@@ -1,0 +1,425 @@
+swagger: "2.0"
+info:
+  title: v1/fluent-verifier.proto
+  version: version not set
+tags:
+  - name: WasmVerifier
+  - name: Health
+consumes:
+  - application/json
+produces:
+  - application/json
+paths:
+  /api/v1/fluent/supported-versions:
+    get:
+      summary: |-
+        Lists supported versions of compilers (rustc) and SDKs (fluentbase-sdk)
+        that this verifier instance can handle.
+      operationId: WasmVerifier_ListSupportedVersions
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1ListSupportedVersionsResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/googlerpcStatus'
+      tags:
+        - WasmVerifier
+  /api/v1/fluent/verify-wasm:
+    post:
+      summary: |-
+        Verifies a WASM contract by compiling the provided source code
+        and comparing the result against the deployed rWASM bytecode hash.
+      operationId: WasmVerifier_VerifyWasm
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1VerifyWasmResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/googlerpcStatus'
+      parameters:
+        - name: body
+          description: Request message for initiating WASM contract verification.
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/v1VerifyWasmRequest'
+      tags:
+        - WasmVerifier
+  /health:
+    get:
+      summary: |-
+        If the requested service is unknown, the call will fail with status
+        NOT_FOUND.
+      operationId: Health_Check
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1HealthCheckResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/googlerpcStatus'
+      parameters:
+        - name: service
+          in: query
+          required: false
+          type: string
+      tags:
+        - Health
+definitions:
+  BuildMetadataBuildOutputInfo:
+    type: object
+    properties:
+      wasm:
+        $ref: '#/definitions/BuildMetadataWasmArtifactInfo'
+      rwasm:
+        $ref: '#/definitions/BuildMetadataWasmArtifactInfo'
+  BuildMetadataBuildSettingsInfo:
+    type: object
+    properties:
+      target_triple:
+        type: string
+      profile:
+        type: string
+      features:
+        type: array
+        items:
+          type: string
+      no_default_features:
+        type: boolean
+      contract_info:
+        $ref: '#/definitions/BuildMetadataContractBuildInfo'
+      build_time_utc_seconds:
+        type: string
+        format: uint64
+        description: Unix timestamp (UTC seconds) indicating when the verifier performed the build.
+      cargo_flags_used:
+        type: array
+        items:
+          type: string
+        description: Cargo flags actually used by the verifier.
+    description: Settings used by the verifier for this specific compilation.
+  BuildMetadataCompilerInfo:
+    type: object
+    properties:
+      name:
+        type: string
+        title: e.g., "rustc"
+      version:
+        type: string
+        title: Full version string, e.g., "rustc 1.78.0 (9b00956e5 2024-04-29)"
+      commit:
+        type: string
+        title: Commit hash of the compiler, if available, e.g., "9b00956e5"
+    description: Information about the compiler used.
+  BuildMetadataContractBuildInfo:
+    type: object
+    properties:
+      path_to_cargo_toml:
+        type: string
+        description: Path to the Cargo.toml file within the source, as provided in the request or detected.
+      name:
+        type: string
+        description: Name of the package from Cargo.toml.
+      version:
+        type: string
+        description: Version of the package from Cargo.toml.
+      sdk_version:
+        type: string
+        description: Version of the Fluentbase SDK used, as determined or provided.
+    description: Information about the specific contract that was built.
+  BuildMetadataSourceFileInfo:
+    type: object
+    properties:
+      content_hash:
+        type: string
+        description: Cryptographic hash (e.g., SHA256) of the file content, hex-encoded.
+      license_identifier:
+        type: string
+        description: SPDX license identifier found in the file, if any.
+    description: Information about each source file included in the compilation.
+  BuildMetadataWasmArtifactInfo:
+    type: object
+    properties:
+      hash:
+        type: string
+        description: Cryptographic hash (e.g., SHA256) of the bytecode, hex-encoded.
+      size:
+        type: string
+        format: uint64
+        description: Size of the bytecode in bytes.
+    description: Information about the generated output artifacts (WASM and rWASM).
+  HealthCheckResponseServingStatus:
+    type: string
+    enum:
+      - UNKNOWN
+      - SERVING
+      - NOT_SERVING
+      - SERVICE_UNKNOWN
+    default: UNKNOWN
+    description: ' - SERVICE_UNKNOWN: Used only by the Watch method.'
+  WasmVerificationSuccessBuildMetadata:
+    type: object
+    properties:
+      compiler:
+        $ref: '#/definitions/BuildMetadataCompilerInfo'
+      language:
+        type: string
+        description: |-
+          Programming language of the contract.
+
+          e.g., "Rust"
+      output:
+        $ref: '#/definitions/BuildMetadataBuildOutputInfo'
+      settings:
+        $ref: '#/definitions/BuildMetadataBuildSettingsInfo'
+      sources:
+        type: object
+        additionalProperties:
+          $ref: '#/definitions/BuildMetadataSourceFileInfo'
+        description: |-
+          Map from relative file path (from the project root identified by path_to_cargo_toml)
+          to its source information.
+      metadata_format_version:
+        type: integer
+        format: int64
+        description: |-
+          Version of this BuildMetadata structure format.
+
+          e.g., 1
+    description: Encapsulates detailed metadata about the build process, environment, and sources.
+  WasmVerificationSuccessBytecodeObject:
+    type: object
+    properties:
+      object:
+        type: string
+        description: Hex-encoded bytecode string, prefixed with "0x".
+      source_map:
+        type: string
+        description: Optional source map associated with the bytecode, if generated.
+    description: Represents a compiled bytecode artifact.
+  fluentVerifierv1Status:
+    type: string
+    enum:
+      - STATUS_UNSPECIFIED
+      - STATUS_SUCCESS
+      - STATUS_FAILURE
+    default: STATUS_UNSPECIFIED
+    description: |-
+      Represents the outcome of a verification attempt.
+
+       - STATUS_UNSPECIFIED: Default, should not be used.
+       - STATUS_SUCCESS: Verification was successful, and the provided source code matches the deployed bytecode.
+       - STATUS_FAILURE: Verification failed due to compilation errors, bytecode mismatch, or other issues.
+  googlerpcStatus:
+    type: object
+    properties:
+      code:
+        type: integer
+        format: int32
+      message:
+        type: string
+      details:
+        type: array
+        items:
+          type: object
+          $ref: '#/definitions/protobufAny'
+  protobufAny:
+    type: object
+    properties:
+      '@type':
+        type: string
+    additionalProperties: {}
+  v1ArchiveSourceDetails:
+    type: object
+    properties:
+      source_code_archive:
+        type: string
+        format: byte
+        description: Bytes of the source code archive (e.g., .zip or .tar.gz).
+      path_to_cargo_toml_in_archive:
+        type: string
+        description: |-
+          Path to the Cargo.toml file of the contract to be verified,
+          relative to the root of the unpacked archive.
+          e.g., "my_project/Cargo.toml" or "Cargo.toml" if the project is at the archive root.
+    description: Details for providing source code as an archive.
+  v1CompileSettings:
+    type: object
+    properties:
+      rustc_version:
+        type: string
+        description: |-
+          Full rustc version string used for the original compilation.
+          e.g., "rustc 1.89.0-nightly (414482f6a 2025-05-13)"
+          If only the version number is known (e.g., "1.78.0"), provide that.
+          The service will attempt to match or use a compatible version.
+      fluentbase_sdk_version:
+        type: string
+        description: |-
+          Version of the fluentbase-sdk used for the original compilation.
+          Must be a semantic version (e.g., "0.5.0").
+      target_triple:
+        type: string
+        description: |-
+          Target triple for WASM compilation.
+          e.g., "wasm32-unknown-unknown"
+          This is often fixed for a given blockchain/VM.
+      profile:
+        type: string
+        description: |-
+          Build profile used for compilation.
+          e.g., "release", "debug", or a custom profile name.
+          Defaults to "release" if not specified or empty.
+      features:
+        type: array
+        items:
+          type: string
+        description: List of features enabled during compilation.
+      no_default_features:
+        type: boolean
+        title: Flag indicating if default features were disabled
+      cargo_flags:
+        type: array
+        items:
+          type: string
+        description: |-
+          Optional: Additional flags to pass to `cargo build`.
+          e.g., ["--config", "net.git-fetch-with-cli=true"]
+          Use with caution, as not all flags may be supported or secure.
+    description: User-provided settings for configuring the compilation process.
+  v1GitSourceDetails:
+    type: object
+    properties:
+      repository_url:
+        type: string
+        title: |-
+          URL of the Git repository. Must be a public HTTPS URL.
+          e.g., "https://github.com/user/project.git"
+      commit_reference:
+        type: string
+        title: |-
+          Commit SHA, tag, or branch name to checkout.
+          e.g., "main", "v0.1.0", "abcdef1234567890"
+      path_to_cargo_toml_in_repository:
+        type: string
+        description: |-
+          Optional: Path to the Cargo.toml file of the contract to be verified,
+          relative to the root of the repository.
+          e.g., "my_contract_subfolder/Cargo.toml".
+          If not provided or empty, assumes Cargo.toml is at the repository root.
+    description: Details for providing source code from a Git repository.
+  v1HealthCheckResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/HealthCheckResponseServingStatus'
+  v1ListSupportedVersionsResponse:
+    type: object
+    properties:
+      rustc_versions:
+        type: array
+        items:
+          type: string
+        description: List of supported rustc version strings (e.g., "1.78.0").
+      fluentbase_sdk_versions:
+        type: array
+        items:
+          type: string
+        description: List of supported fluentbase-sdk version strings (e.g., "0.5.0").
+    description: Response message listing supported versions.
+  v1VerifyWasmRequest:
+    type: object
+    properties:
+      archive_source:
+        $ref: '#/definitions/v1ArchiveSourceDetails'
+      git_source:
+        $ref: '#/definitions/v1GitSourceDetails'
+      deployed_rwasm_bytecode_hash:
+        type: string
+        description: |-
+          Deployed contract information.
+          Hash of the rWASM bytecode as deployed on the blockchain.
+      chain_id:
+        type: string
+        description: |-
+          Identifier of the chain where the contract is deployed.
+          e.g., "1" for Ethereum mainnet, or a network name like "fluent-testnet".
+      contract_address:
+        type: string
+        title: |-
+          Address of the deployed contract.
+          e.g., "0x123abc..."
+      compile_settings:
+        $ref: '#/definitions/v1CompileSettings'
+        description: |-
+          Compilation settings that were used for the original build of the deployed contract.
+          This field is required.
+    description: Request message for initiating WASM contract verification.
+  v1VerifyWasmResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/fluentVerifierv1Status'
+        description: Overall status of the verification attempt.
+      success_details:
+        $ref: '#/definitions/v1WasmVerificationSuccess'
+        description: Details of a successful verification. Present only if status is STATUS_SUCCESS.
+      failure_details:
+        $ref: '#/definitions/v1WasmVerificationFailure'
+        description: Details of a failed verification. Present only if status is STATUS_FAILURE.
+    description: Response message for WASM contract verification.
+  v1WasmVerificationFailure:
+    type: object
+    properties:
+      error_message:
+        type: string
+        description: Human-readable message describing the reason for failure.
+      compiler_output:
+        type: string
+        description: |-
+          Output from the compiler, if the failure occurred during compilation.
+          This can help users diagnose build issues.
+      generated_rwasm_bytecode_hash:
+        type: string
+        description: |-
+          Hash of the rWASM bytecode generated by the verifier during the attempt,
+          if compilation was successful but the hash did not match the deployed bytecode hash.
+          Hex-encoded.
+    description: Contains details of a failed verification attempt.
+  v1WasmVerificationSuccess:
+    type: object
+    properties:
+      contract_name:
+        type: string
+        description: The name of the verified contract, typically from its Cargo.toml.
+      abi_json_string:
+        type: string
+        description: Contract Application Binary Interface (ABI), serialized as a JSON string.
+      wasm_bytecode:
+        $ref: '#/definitions/WasmVerificationSuccessBytecodeObject'
+        description: The WASM bytecode compiled by the verifier from the provided sources.
+      rwasm_bytecode:
+        $ref: '#/definitions/WasmVerificationSuccessBytecodeObject'
+        description: |-
+          The rWASM bytecode generated by the verifier from the compiled WASM.
+          This should match the deployed version if verification is successful.
+      method_identifiers:
+        type: object
+        additionalProperties:
+          type: string
+        title: |-
+          Mapping of human-readable method signatures to their 4-byte function selectors.
+          e.g., "power(uint256,uint256)" -> "c04f01fc"
+      build_metadata:
+        $ref: '#/definitions/WasmVerificationSuccessBuildMetadata'
+    description: |-
+      Contains detailed information about a successfully verified contract.
+      This structure is primarily based on the metadata output from `fluent-wasm-compiler-cli`.

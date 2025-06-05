@@ -1,0 +1,27 @@
+[package]
+name = "power"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+fluentbase-sdk = { path = "/Users/danilnaumov/dev/src/github.com/fluentlabs-xyz/fluentbase/crates/sdk", default-features = false }
+
+[dev-dependencies]
+fluentbase-sdk-testing = { path = "/Users/danilnaumov/dev/src/github.com/fluentlabs-xyz/fluentbase/crates/sdk-testing" }
+
+[features]
+default = ["std"]
+std = ["fluentbase-sdk/std"]
+wasm = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+panic = "abort"
+codegen-units = 1
+
+# Exclude from foundry workspace
+[workspace]

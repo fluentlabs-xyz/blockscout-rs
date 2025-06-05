@@ -1,0 +1,15 @@
+{
+  "sourceCodeArchive": "bGFsYWxhbGFsYWxhbGFsYWxh",
+  "pathToCargoTomlInArchive": "my_contract/Cargo.toml",
+  "deployedRwasmBytecodeHash": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+  "chainId": "fluent-testnet-v42",
+  "contractAddress": "0x1234567890123456789012345678901234567890",
+  "compileSettings": {
+    "rustcVersion": "rustc 1.78.0 (9b00956e5 2024-04-29)",
+    "fluentbaseSdkVersion": "0.1.0",
+    "targetTriple": "wasm32-unknown-unknown",
+    "profile": "release",
+    "features": ["std", "customFeature"],
+    "noDefaultFeatures": false
+  }
+}

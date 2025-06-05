@@ -1,0 +1,31 @@
+[package]
+name = "fluent-verifier-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fluent-verifier-proto = { path = "../fluent-verifier-proto" }
+fluent-verifier-logic = { path = "../fluent-verifier-logic" }
+bytes = { workspace = true }
+bollard = { workspace = true }
+actix-web = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+blockscout-service-launcher = { workspace = true }
+config = "0.14"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
+tonic = { workspace = true }
+tracing = { workspace = true }
+semver = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["v4"] }
+hex = {workspace = true}
+sha2 = { workspace = true }
+sha3 = { workspace = true }
+
+[dev-dependencies]
+blockscout-service-launcher = { workspace = true, features = [ "test-server" ] }
+pretty_assertions = "1.3"
+reqwest = { version = "0.12", features = ["json"]}

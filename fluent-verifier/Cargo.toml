@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "fluent-verifier-logic",
+    "fluent-verifier-proto",
+    "fluent-verifier-server",
+]
+
+[workspace.dependencies]
+actix-prost = { version = "0.1.0" }
+actix-prost-build = { version = "0.1.0" }
+actix-prost-macros = { version = "0.1.0" }
+actix-web = { version = "4.2" }
+anyhow = { version = "1.0" }
+async-trait = { version = "0.1" }
+blockscout-display-bytes = { version = "1.1.0" }
+blockscout-service-launcher = { version = "0.17.0" }
+bollard = { version = "0.17.1" }
+bytes = { version = "1.2" }
+flate2 = { version = "1.0" }
+futures-util = { version = "0.3.30" }
+git2 = { version = "0.19.0" }
+pretty_assertions = { version = "1.4.0" }
+prost = { version = "0.13" }
+prost-build = { version = "0.13" }
+prost-types = { version = "0.13" }
+reqwest = { version = "0.12" }
+semver = { version = "1.0" }
+sha2 = { version = "0.10" }
+sha3 = { version = "0.10" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.96" }
+serde_with = { version = "3", features = ["base64", "hex"] }
+tar = { version = "0.4.42" }
+tempfile = { version = "3.10.1" }
+thiserror = { version = "1.0" }
+tokio = { version = "1.23", features = ["full"] }
+tonic = { version = "0.12" }
+tonic-build = { version = "0.12", features = ["prost"] }
+tracing = { version = "0.1" }
+url = { version = "2.4" }
+uuid = { version = "1.10.0" }
+toml = { version = "0.8.22" }
+walkdir = { version = "2.5.0" }
+zip = { version = "4.0.0" }
+hex = "0.4.3"
+

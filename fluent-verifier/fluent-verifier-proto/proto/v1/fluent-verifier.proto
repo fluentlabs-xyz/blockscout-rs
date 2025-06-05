@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package blockscout.fluentVerifier.v1;
+
+option go_package = "github.com/blockscout/blockscout-rs/fluent-verifier";
+
+// Service definition for verifying Fluent WASM smart contracts.
+service WasmVerifier {
+  // Verifies a WASM contract by compiling the provided source code
+  // and comparing the result against the deployed rWASM bytecode hash.
+  rpc VerifyWasm(VerifyWasmRequest) returns (VerifyWasmResponse);
+
+  // Lists supported versions of compilers (rustc) and SDKs (fluentbase-sdk)
+  // that this verifier instance can handle.
+  rpc ListSupportedVersions(ListSupportedVersionsRequest) returns (ListSupportedVersionsResponse);
+}
+
+// User-provided settings for configuring the compilation process.
+message CompileSettings {
+  // Full rustc version string used for the original compilation.
+  // e.g., "rustc 1.89.0-nightly (414482f6a 2025-05-13)"
+  // If only the version number is known (e.g., "1.78.0"), provide that.
+  // The service will attempt to match or use a compatible version.
+  string rustc_version = 1;
+
+  // Version of the fluentbase-sdk used for the original compilation.
+  // Must be a semantic version (e.g., "0.5.0").
+  string fluentbase_sdk_version = 2;
+
+  // Target triple for WASM compilation.
+  // e.g., "wasm32-unknown-unknown"
+  // This is often fixed for a given blockchain/VM.
+  string target_triple = 3;
+
+  // Build profile used for compilation.
+  // e.g., "release", "debug", or a custom profile name.
+  // Defaults to "release" if not specified or empty.
+  string profile = 4;
+
+  // List of features enabled during compilation.
+  repeated string features = 5;
+
+  // Flag indicating if default features were disabled (--no-default-features).
+  bool no_default_features = 6;
+
+  // Optional: Additional flags to pass to `cargo build`.
+  // e.g., ["--config", "net.git-fetch-with-cli=true"]
+  // Use with caution, as not all flags may be supported or secure.
+  repeated string cargo_flags = 7;
+}
+
+// Details for providing source code as an archive.
+message ArchiveSourceDetails {
+  // Bytes of the source code archive (e.g., .zip or .tar.gz).
+  bytes source_code_archive = 1;
+  // Path to the Cargo.toml file of the contract to be verified,
+  // relative to the root of the unpacked archive.
+  // e.g., "my_project/Cargo.toml" or "Cargo.toml" if the project is at the archive root.
+  string path_to_cargo_toml_in_archive = 2;
+}
+
+// Details for providing source code from a Git repository.
+message GitSourceDetails {
+  // URL of the Git repository. Must be a public HTTPS URL.
+  // e.g., "https://github.com/user/project.git"
+  string repository_url = 1;
+  // Commit SHA, tag, or branch name to checkout.
+  // e.g., "main", "v0.1.0", "abcdef1234567890"
+  string commit_reference = 2;
+  // Optional: Path to the Cargo.toml file of the contract to be verified,
+  // relative to the root of the repository.
+  // e.g., "my_contract_subfolder/Cargo.toml".
+  // If not provided or empty, assumes Cargo.toml is at the repository root.
+  string path_to_cargo_toml_in_repository = 3;
+}
+
+// Request message for initiating WASM contract verification.
+message VerifyWasmRequest {
+  // Source code information. Choose one of the following:
+  oneof source_details {
+    ArchiveSourceDetails archive_source = 1;
+    GitSourceDetails git_source = 2;
+  }
+
+  // Deployed contract information.
+  // Hash of the rWASM bytecode as deployed on the blockchain.
+  string deployed_rwasm_bytecode_hash = 3;
+  // Identifier of the chain where the contract is deployed.
+  // e.g., "1" for Ethereum mainnet, or a network name like "fluent-testnet".
+  string chain_id = 4;
+  // Address of the deployed contract.
+  // e.g., "0x123abc..."
+  string contract_address = 5;
+
+  // Compilation settings that were used for the original build of the deployed contract.
+  // This field is required.
+  CompileSettings compile_settings = 6;
+}
+
+// Response message for WASM contract verification.
+message VerifyWasmResponse {
+  // Overall status of the verification attempt.
+  Status status = 1;
+  // Details of a successful verification. Present only if status is STATUS_SUCCESS.
+  optional WasmVerificationSuccess success_details = 2;
+  // Details of a failed verification. Present only if status is STATUS_FAILURE.
+  optional WasmVerificationFailure failure_details = 3;
+}
+
+// Represents the outcome of a verification attempt.
+enum Status {
+  // Default, should not be used.
+  STATUS_UNSPECIFIED = 0;
+  // Verification was successful, and the provided source code matches the deployed bytecode.
+  STATUS_SUCCESS = 1;
+  // Verification failed due to compilation errors, bytecode mismatch, or other issues.
+  STATUS_FAILURE = 2;
+}
+
+// Contains detailed information about a successfully verified contract.
+// This structure is primarily based on the metadata output from `fluent-wasm-compiler-cli`.
+message WasmVerificationSuccess {
+  // The name of the verified contract, typically from its Cargo.toml.
+  string contract_name = 1;
+  // Contract Application Binary Interface (ABI), serialized as a JSON string.
+  optional string abi_json_string = 2;
+
+  // Represents a compiled bytecode artifact.
+  message BytecodeObject {
+    // Hex-encoded bytecode string, prefixed with "0x".
+    string object = 1;
+    // Optional source map associated with the bytecode, if generated.
+    optional string source_map = 2;
+  }
+  // The WASM bytecode compiled by the verifier from the provided sources.
+  optional BytecodeObject wasm_bytecode = 3;
+  // The rWASM bytecode generated by the verifier from the compiled WASM.
+  // This should match the deployed version if verification is successful.
+  optional BytecodeObject rwasm_bytecode = 4;
+
+  // Mapping of human-readable method signatures to their 4-byte function selectors.
+  // e.g., "power(uint256,uint256)" -> "c04f01fc"
+  map<string, string> method_identifiers = 5;
+
+  // Encapsulates detailed metadata about the build process, environment, and sources.
+  message BuildMetadata {
+    // Information about the compiler used.
+    message CompilerInfo {
+      string name = 1;    // e.g., "rustc"
+      string version = 2; // Full version string, e.g., "rustc 1.78.0 (9b00956e5 2024-04-29)"
+      optional string commit = 3; // Commit hash of the compiler, if available, e.g., "9b00956e5"
+    }
+    optional CompilerInfo compiler = 1;
+
+    // Programming language of the contract.
+    string language = 2; // e.g., "Rust"
+
+    // Information about the generated output artifacts (WASM and rWASM).
+    message WasmArtifactInfo {
+      string hash = 1;   // Cryptographic hash (e.g., SHA256) of the bytecode, hex-encoded.
+      uint64 size = 2;   // Size of the bytecode in bytes.
+    }
+    message BuildOutputInfo {
+      optional WasmArtifactInfo wasm = 1;
+      optional WasmArtifactInfo rwasm = 2;
+    }
+    optional BuildOutputInfo output = 3;
+
+    // Information about the specific contract that was built.
+    message ContractBuildInfo {
+      // Path to the Cargo.toml file within the source, as provided in the request or detected.
+      string path_to_cargo_toml = 1;
+      // Name of the package from Cargo.toml.
+      string name = 2;
+      // Version of the package from Cargo.toml.
+      string version = 3;
+      // Version of the Fluentbase SDK used, as determined or provided.
+      optional string sdk_version = 4;
+    }
+    // Settings used by the verifier for this specific compilation.
+    message BuildSettingsInfo {
+      string target_triple = 1;
+      string profile = 2;
+      repeated string features = 3;
+      bool no_default_features = 4;
+      optional ContractBuildInfo contract_info = 5;
+      // Unix timestamp (UTC seconds) indicating when the verifier performed the build.
+      uint64 build_time_utc_seconds = 6;
+      repeated string cargo_flags_used = 7; // Cargo flags actually used by the verifier.
+    }
+    optional BuildSettingsInfo settings = 4;
+
+    // Information about each source file included in the compilation.
+    message SourceFileInfo {
+      // Cryptographic hash (e.g., SHA256) of the file content, hex-encoded.
+      string content_hash = 1;
+      // SPDX license identifier found in the file, if any.
+      optional string license_identifier = 2;
+    }
+    // Map from relative file path (from the project root identified by path_to_cargo_toml)
+    // to its source information.
+    map<string, SourceFileInfo> sources = 5;
+
+    // Version of this BuildMetadata structure format.
+    uint32 metadata_format_version = 6; // e.g., 1
+  }
+  optional BuildMetadata build_metadata = 6;
+}
+
+// Contains details of a failed verification attempt.
+message WasmVerificationFailure {
+  // Human-readable message describing the reason for failure.
+  string error_message = 1;
+  // Output from the compiler, if the failure occurred during compilation.
+  // This can help users diagnose build issues.
+  optional string compiler_output = 2;
+  // Hash of the rWASM bytecode generated by the verifier during the attempt,
+  // if compilation was successful but the hash did not match the deployed bytecode hash.
+  // Hex-encoded.
+  optional string generated_rwasm_bytecode_hash = 3;
+}
+
+// Request message for listing supported compiler and SDK versions.
+message ListSupportedVersionsRequest {}
+
+// Response message listing supported versions.
+message ListSupportedVersionsResponse {
+  // List of supported rustc version strings (e.g., "1.78.0").
+  repeated string rustc_versions = 1;
+  // List of supported fluentbase-sdk version strings (e.g., "0.5.0").
+  repeated string fluentbase_sdk_versions = 2;
+}

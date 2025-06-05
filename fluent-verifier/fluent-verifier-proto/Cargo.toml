@@ -1,0 +1,20 @@
+[package]
+name = "fluent-verifier-proto"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+actix-prost = { workspace = true }
+actix-prost-macros = { workspace = true }
+actix-web = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+serde = { workspace = true }
+serde_with = { workspace = true }
+tonic = { workspace = true }
+
+[build-dependencies]
+actix-prost-build = { workspace = true }
+prost-build = { workspace = true }
+tonic-build = { workspace = true }
