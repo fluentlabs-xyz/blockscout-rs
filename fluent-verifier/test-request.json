@@ -1,0 +1,17 @@
+{
+  "gitSource": {
+    "repositoryUrl": "https://github.com/fluentlabs-xyz/power-calculator.git",
+    "commitRef": "6440d91de870fad083cbc77646680a90eae674a0",
+    "projectPath": "."
+  },
+  "contractAddress": "0x799a7b7601bc355a16e6b97aaba51e263a9bbda8",
+  "chainId": "20993",
+  "rpcEndpoint": "https://rpc.dev.gblend.xyz",
+  "compileSettings": {
+    "rustcVersion": "rustc 1.87.0",
+    "sdkVersion": "v0.1.0",
+    "profile": "release",
+    "features": [],
+    "noDefaultFeatures": true
+  }
+}

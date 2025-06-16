@@ -5,6 +5,7 @@ edition = "2021"
 
 
 [dependencies]
+fluent-verifier-proto = { path = "../fluent-verifier-proto" }
 anyhow = "1.0"
 blockscout-display-bytes = "1.0"
 tracing = "0.1"
@@ -18,16 +19,18 @@ tar = { workspace = true }
 flate2 = { workspace = true }
 thiserror = { workspace = true }
 git2 = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process"] }
+tokio-test = {workspace = true}
 toml = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
+tonic = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-blockscout-service-launcher = { version = "0.9.0", features = [
-
-] }
+blockscout-service-launcher = { version = "0.9.0"}
 pretty_assertions = "1.3"
+

@@ -1,0 +1,27 @@
+FROM fluent-base:ubuntu-22.04
+
+# Build arguments for customization
+ARG RUST_TOOLCHAIN=nightly-2025-05-13
+ARG SDK_VERSION=e5a6008fe466d9449297dedd4a1130a65bfe8577
+
+# Install Rust toolchain
+RUN rustup toolchain install ${RUST_TOOLCHAIN} && \
+    rustup default ${RUST_TOOLCHAIN}
+
+# Add wasm32 target
+RUN rustup target add wasm32-unknown-unknown
+
+# Clone and install fluent-builder
+RUN git clone https://github.com/fluentlabs-xyz/fluent-builder.git /tmp/fluent-builder && \
+    cd /tmp/fluent-builder && \
+    git checkout ${SDK_VERSION} && \
+    echo "=== Building from commit: $(git rev-parse HEAD) ===" && \
+    cargo install --path crates/cli --locked && \
+    rm -rf /tmp/fluent-builder
+
+# Verify installations
+RUN echo "=== Installed versions ===" && \
+    rustc --version && \
+    fluent-builder --version
+
+ENTRYPOINT ["fluent-builder"]

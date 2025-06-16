@@ -1,67 +1,48 @@
-use semver::Version;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum VerificationError {
-    #[error("Bytecode mismatch: expected {expected}, got {actual}")]
-    BytecodeMismatch { expected: String, actual: String },
+    #[error("Source preparation failed: {0}")]
+    Source(String),
 
-    #[error("Source code error: {0}")]
-    SourceError(#[from] SourceError),
+    #[error("Docker operation failed: {0}")]
+    Docker(String),
 
-    #[error("Compilation failed: {0}")]
-    CompilationError(String),
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
 
-    #[error("Version error: {0}")]
-    VersionError(#[from] VersionError),
+    #[error("Verification failed: {0}")]
+    VerificationFailed(String),
 
-    #[error("Docker error: {0}")]
-    DockerError(#[from] anyhow::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 
-    #[error("Timeout: compilation exceeded {0} seconds")]
-    Timeout(u64),
-
-    #[error("Invalid project structure: {0}")]
-    InvalidProject(String),
+    #[error("JSON parsing error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
-// Implement From<bollard::errors::Error> for VerificationError
 impl From<bollard::errors::Error> for VerificationError {
     fn from(err: bollard::errors::Error) -> Self {
-        // Convert bollard error to anyhow error, which will then convert to VerificationError
-        VerificationError::DockerError(anyhow::anyhow!("Docker error: {}", err))
+        VerificationError::Docker(err.to_string())
     }
 }
 
-#[derive(Debug, Error)]
-pub enum SourceError {
-    #[error("Git repository error: {0}")]
-    GitError(String),
-
-    #[error("Archive extraction failed: {0}")]
-    ArchiveError(String),
-
-    #[error("Repository not found: {0}")]
-    RepositoryNotFound(String),
-
-    #[error("Commit not found: {0}")]
-    CommitNotFound(String),
-
-    #[error("Invalid archive format")]
-    InvalidArchiveFormat,
-
-    #[error("Invalid project structure: {0}")]
-    InvalidProject(String),
+impl From<git2::Error> for VerificationError {
+    fn from(err: git2::Error) -> Self {
+        match err.code() {
+            git2::ErrorCode::NotFound => {
+                VerificationError::Source(format!("Repository or reference not found: {}", err))
+            }
+            git2::ErrorCode::Auth => {
+                VerificationError::Source(format!("Authentication failed: {}", err))
+            }
+            _ => VerificationError::Source(format!("Git error: {}", err)),
+        }
+    }
 }
 
-#[derive(Debug, Error)]
-pub enum VersionError {
-    #[error("Invalid rustc version in rust-toolchain.toml: {0}")]
-    InvalidToolchainVersion(String),
-
-    #[error("Unsupported rustc version: {version} (reason: {reason})")]
-    UnsupportedRustcVersion { version: Version, reason: String },
-
-    #[error("rust-toolchain.toml parsing error: {0}")]
-    ToolchainParseError(String),
+impl From<anyhow::Error> for VerificationError {
+    fn from(err: anyhow::Error) -> Self {
+        VerificationError::VerificationFailed(err.to_string())
+    }
 }

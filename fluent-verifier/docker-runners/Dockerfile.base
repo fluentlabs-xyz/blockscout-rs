@@ -1,0 +1,25 @@
+FROM --platform=linux/amd64 ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure git
+RUN update-ca-certificates && \
+    git config --global http.sslVerify true && \
+    git config --global http.postBuffer 524288000
+
+# Install rustup without any toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Pre-create workspace
+WORKDIR /workspace
