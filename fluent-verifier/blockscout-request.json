@@ -1,0 +1,15 @@
+{
+  "address_hash": "0xe116ca118744a34f489853b76dd946bd0f87216f",
+  "git_source": {
+    "repository_url": "https://github.com/fluentlabs-xyz/power-calculator.git",
+    "commit_reference": "6440d91de870fad083cbc77646680a90eae674a0",
+    "path_to_cargo_toml_in_repository": "."
+  },
+  "compile_settings": {
+    "rustc_version": "rustc 1.87.0",
+    "fluentbase_sdk_version": "v0.1.0",
+    "profile": "release",
+    "features": [],
+    "no_default_features": true
+  }
+}
