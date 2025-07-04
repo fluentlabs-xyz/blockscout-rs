@@ -1,0 +1,67 @@
+on:
+  push:
+    branches:
+      - 'feat/fluent-verifier'
+    tags:
+      - 'fluent-verifier/v*'
+    paths:
+      - fluent-verifier/**
+      - .github/workflows/fluent-verifier.yml
+      - .github/workflows/_*.yml
+      - .github/actions/**
+  pull_request:
+    paths:
+      - fluent-verifier/**
+      - .github/workflows/fluent-verifier.yml
+      - .github/workflows/_*.yml
+      - .github/actions/**
+
+name: Test, lint and docker (fluent-verifier)
+
+defaults:
+  run:
+    working-directory: fluent-verifier
+
+jobs:
+  test:
+    name: Unit, doc and integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Setup
+        uses: ./.github/actions/setup
+        with:
+          working-directory: fluent-verifier
+
+      - name: Unit tests
+        run: RUST_BACKTRACE=1 RUST_LOG=info cargo test --locked --workspace --all-features --lib --bins -- --nocapture
+        if: success() || failure()
+
+      - name: Doc tests
+        run: cargo test --locked --workspace --all-features --doc
+        if: success() || failure()
+
+      - name: Integration tests
+        run: RUST_BACKTRACE=1 RUST_LOG=info cargo test --locked --workspace --test '*' -- --nocapture --include-ignored
+        if: success() || failure()
+
+  lint:
+    name: Linting
+    uses: ./.github/workflows/_linting.yml
+    with:
+      working-directory: fluent-verifier
+
+  docker:
+    name: Docker build and docker push
+    needs:
+      - test
+      - lint
+    if: |
+      always() &&
+      (needs.test.result == 'success' || needs.test.result == 'cancelled') &&
+      (needs.lint.result == 'success' || needs.lint.result == 'cancelled')
+    uses: ./.github/workflows/_docker-build-push.yml
+    with:
+      service-name: fluent-verifier
