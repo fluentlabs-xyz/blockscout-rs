@@ -1,6 +1,8 @@
-use crate::{docker, error::VerificationError, source};
-use crate::proto::{
-    VerifyWasmRequest, VerifyWasmResponse, VerificationResult, VerificationStatus
+use crate::{
+    docker,
+    error::VerificationError,
+    proto::{VerificationResult, VerificationStatus, VerifyWasmRequest, VerifyWasmResponse},
+    source,
 };
 
 /// Main entry point for contract verification
@@ -19,27 +21,29 @@ pub async fn verify_contract(
         }
         None => {
             return Err(VerificationError::InvalidRequest(
-                "No source provided".to_string()
+                "No source provided".to_string(),
             ));
         }
     };
 
     // Step 2: Validate SDK version (the only required compile setting now)
-    let compile_settings = request.compile_settings.as_ref()
-        .ok_or_else(|| VerificationError::InvalidRequest(
-            "compile_settings is required".to_string()
-        ))?;
-    
+    let compile_settings = request.compile_settings.as_ref().ok_or_else(|| {
+        VerificationError::InvalidRequest("compile_settings is required".to_string())
+    })?;
+
     if compile_settings.sdk_version.is_empty() {
         return Err(VerificationError::InvalidRequest(
-            "sdk_version is required in compile_settings".to_string()
+            "sdk_version is required in compile_settings".to_string(),
         ));
     }
-    
+
     tracing::info!("Using SDK version: {}", compile_settings.sdk_version);
 
     // Step 3: Run verification through CLI
-    tracing::info!("Running verification with Docker image tag: {}", compile_settings.sdk_version);
+    tracing::info!(
+        "Running verification with Docker image tag: {}",
+        compile_settings.sdk_version
+    );
     let cli_output = docker::run_verification(
         docker,
         source_dir.path(),
@@ -49,7 +53,8 @@ pub async fn verify_contract(
         &compile_settings.sdk_version,
         &compile_settings.features,
         compile_settings.no_default_features,
-    ).await?;
+    )
+    .await?;
 
     // Step 4: Process result
     let docker::CliOutput {
@@ -110,17 +115,16 @@ mod tests {
             rpc_endpoint: "http://localhost:8545".to_string(),
             compile_settings: None,
         };
-        
+
         // Test just the validation logic without Docker
         let compile_settings = request.compile_settings.as_ref();
         assert!(compile_settings.is_none());
-        
+
         // This is what would happen in verify_contract
-        let error = compile_settings
-            .ok_or_else(|| VerificationError::InvalidRequest(
-                "compile_settings is required".to_string()
-            ));
-        
+        let error = compile_settings.ok_or_else(|| {
+            VerificationError::InvalidRequest("compile_settings is required".to_string())
+        });
+
         assert!(error.is_err());
         if let Err(VerificationError::InvalidRequest(msg)) = error {
             assert!(msg.contains("compile_settings is required"));
@@ -140,20 +144,20 @@ mod tests {
                 no_default_features: false,
             }),
         };
-        
+
         // Test just the validation logic
         let compile_settings = request.compile_settings.as_ref().unwrap();
         assert!(compile_settings.sdk_version.is_empty());
-        
+
         // This is what would happen in verify_contract
         let error = if compile_settings.sdk_version.is_empty() {
             Err(VerificationError::InvalidRequest(
-                "sdk_version is required in compile_settings".to_string()
+                "sdk_version is required in compile_settings".to_string(),
             ))
         } else {
             Ok(())
         };
-        
+
         assert!(error.is_err());
         if let Err(VerificationError::InvalidRequest(msg)) = error {
             assert!(msg.contains("sdk_version is required"));
@@ -168,7 +172,7 @@ mod tests {
                     repository_url: "https://github.com/test/repo.git".to_string(),
                     commit_ref: "main".to_string(),
                     project_path: ".".to_string(),
-                }
+                },
             )),
             contract_address: "0x1234567890123456789012345678901234567890".to_string(),
             chain_id: "1".to_string(),
@@ -179,13 +183,13 @@ mod tests {
                 no_default_features: false,
             }),
         };
-        
+
         // Validate all required fields are present
         assert!(request.source.is_some());
         assert!(!request.contract_address.is_empty());
         assert!(!request.chain_id.is_empty());
         assert!(!request.rpc_endpoint.is_empty());
-        
+
         let compile_settings = request.compile_settings.as_ref().unwrap();
         assert!(!compile_settings.sdk_version.is_empty());
     }
@@ -208,8 +212,11 @@ mod tests {
             build_platform: "docker:linux-x86_64".to_string(),
             source_files: std::collections::BTreeMap::new(),
         };
-        
-        assert_eq!(result.contract_address, "0x1234567890123456789012345678901234567890");
+
+        assert_eq!(
+            result.contract_address,
+            "0x1234567890123456789012345678901234567890"
+        );
         assert_eq!(result.expected_hash, "0xabc123");
         assert_eq!(result.actual_hash, "0xabc123");
     }

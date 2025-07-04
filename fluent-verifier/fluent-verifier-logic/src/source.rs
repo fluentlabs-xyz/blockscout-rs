@@ -1,5 +1,7 @@
-use crate::error::VerificationError;
-use crate::proto::{ArchiveSource, GitSource};
+use crate::{
+    error::VerificationError,
+    proto::{ArchiveSource, GitSource},
+};
 use flate2::read::GzDecoder;
 use std::path::Path;
 use tar::Archive;
@@ -12,42 +14,41 @@ pub async fn prepare_source_from_archive(
 ) -> Result<TempDir, VerificationError> {
     let content = &archive.content;
     let format = detect_archive_format(content)?;
-    
+
     let temp_dir = extract_archive(content, format).await?;
-    
+
     // If project_path is specified, verify it exists
     if !archive.project_path.is_empty() {
         let project_dir = temp_dir.path().join(&archive.project_path);
         if !project_dir.exists() {
-            return Err(VerificationError::Source(
-                format!("Project path '{}' not found in archive", archive.project_path)
-            ));
+            return Err(VerificationError::Source(format!(
+                "Project path '{}' not found in archive",
+                archive.project_path
+            )));
         }
     }
-    
+
     Ok(temp_dir)
 }
 
 /// Prepares source code from git repository
-pub async fn prepare_source_from_git(
-    git: &GitSource,
-) -> Result<TempDir, VerificationError> {
+pub async fn prepare_source_from_git(git: &GitSource) -> Result<TempDir, VerificationError> {
     use git2::Repository;
     use url::Url;
-    
+
     // Validate URL
     let url = Url::parse(&git.repository_url)
         .map_err(|e| VerificationError::InvalidRequest(format!("Invalid git URL: {e}")))?;
-    
+
     if !matches!(url.scheme(), "https" | "http") {
         return Err(VerificationError::InvalidRequest(
-            "Only HTTPS/HTTP git URLs are supported".to_string()
+            "Only HTTPS/HTTP git URLs are supported".to_string(),
         ));
     }
-    
+
     // Clone repository
     let temp_dir = tempfile::tempdir()?;
-    
+
     // Try simple clone first (works for public repos)
     let repo = match Repository::clone(&git.repository_url, temp_dir.path()) {
         Ok(repo) => repo,
@@ -57,35 +58,37 @@ pub async fn prepare_source_from_git(
             ));
         }
         Err(err) => {
-            return Err(VerificationError::Source(format!("Failed to clone repository: {err}")));
+            return Err(VerificationError::Source(format!(
+                "Failed to clone repository: {err}"
+            )));
         }
     };
-    
+
     // Checkout specified commit/branch/tag
-    let commit_ref = if git.commit_ref.is_empty() { 
-        "main" 
-    } else { 
-        &git.commit_ref 
+    let commit_ref = if git.commit_ref.is_empty() {
+        "main"
+    } else {
+        &git.commit_ref
     };
-    
-    let obj = repo.revparse_single(commit_ref)
-        .map_err(|_| VerificationError::Source(
-            format!("Commit/branch '{commit_ref}' not found")
-        ))?;
-    
+
+    let obj = repo.revparse_single(commit_ref).map_err(|_| {
+        VerificationError::Source(format!("Commit/branch '{commit_ref}' not found"))
+    })?;
+
     repo.checkout_tree(&obj, None)?;
     repo.set_head_detached(obj.id())?;
-    
+
     // Verify project_path if specified
     if !git.project_path.is_empty() {
         let project_dir = temp_dir.path().join(&git.project_path);
         if !project_dir.exists() {
-            return Err(VerificationError::Source(
-                format!("Project path '{}' not found in repository", git.project_path)
-            ));
+            return Err(VerificationError::Source(format!(
+                "Project path '{}' not found in repository",
+                git.project_path
+            )));
         }
     }
-    
+
     Ok(temp_dir)
 }
 
@@ -94,9 +97,9 @@ pub async fn collect_source_files(
     dir: &Path,
 ) -> Result<std::collections::BTreeMap<String, String>, VerificationError> {
     use walkdir::WalkDir;
-    
+
     let mut files = std::collections::BTreeMap::new();
-    
+
     for entry in WalkDir::new(dir)
         .follow_links(true)
         .into_iter()
@@ -104,31 +107,36 @@ pub async fn collect_source_files(
         .filter(|e| e.path().is_file())
     {
         let path = entry.path();
-        
+
         // Skip unnecessary directories
-        if path.components().any(|c| 
-            matches!(c.as_os_str().to_str(), Some("target") | Some(".git") | Some("node_modules"))
-        ) {
+        if path.components().any(|c| {
+            matches!(
+                c.as_os_str().to_str(),
+                Some("target") | Some(".git") | Some("node_modules")
+            )
+        }) {
             continue;
         }
-        
+
         // Include only source files
-        let include = path.extension()
+        let include = path
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| matches!(ext, "rs" | "toml" | "lock" | "json" | "md"))
             .unwrap_or(false);
-            
+
         if include {
-            let relative = path.strip_prefix(dir)
+            let relative = path
+                .strip_prefix(dir)
                 .unwrap()
                 .to_string_lossy()
                 .into_owned();
-                
+
             let content = tokio::fs::read_to_string(path).await?;
             files.insert(relative, content);
         }
     }
-    
+
     Ok(files)
 }
 
@@ -146,20 +154,25 @@ fn detect_archive_format(content: &[u8]) -> Result<ArchiveFormat, VerificationEr
     } else if content.len() >= 4 && &content[0..4] == b"PK\x03\x04" {
         Ok(ArchiveFormat::Zip)
     } else {
-        Err(VerificationError::Source("Unknown archive format".to_string()))
+        Err(VerificationError::Source(
+            "Unknown archive format".to_string(),
+        ))
     }
 }
 
-async fn extract_archive(content: &[u8], format: ArchiveFormat) -> Result<TempDir, VerificationError> {
+async fn extract_archive(
+    content: &[u8],
+    format: ArchiveFormat,
+) -> Result<TempDir, VerificationError> {
     let temp_dir = tempfile::tempdir()?;
-    
+
     match format {
         ArchiveFormat::TarGz => extract_tar_gz(content, &temp_dir).await?,
         ArchiveFormat::Zip => extract_zip(content, &temp_dir).await?,
     }
-    
+
     normalize_archive_structure(&temp_dir).await?;
-    
+
     Ok(temp_dir)
 }
 
@@ -188,12 +201,14 @@ async fn extract_zip(content: &[u8], temp_dir: &TempDir) -> Result<(), Verificat
         let dest_path = temp_dir.path().join(&path);
 
         if file.is_dir() {
-            std::fs::create_dir_all(&dest_path)
-                .map_err(|e| VerificationError::Source(format!("Failed to create directory: {e}")))?;
+            std::fs::create_dir_all(&dest_path).map_err(|e| {
+                VerificationError::Source(format!("Failed to create directory: {e}"))
+            })?;
         } else {
             if let Some(parent) = dest_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| VerificationError::Source(format!("Failed to create parent directory: {e}")))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    VerificationError::Source(format!("Failed to create parent directory: {e}"))
+                })?;
             }
 
             let mut dest_file = std::fs::File::create(&dest_path)
@@ -218,14 +233,15 @@ async fn normalize_archive_structure(temp_dir: &TempDir) -> Result<(), Verificat
         let path = entry.path();
 
         if path.is_dir() && path.join("Cargo.toml").exists() {
-            let temp_move_dir = tempfile::tempdir_in(temp_dir.path())
-                .map_err(|e| VerificationError::Source(format!("Failed to create temp directory: {e}")))?;
+            let temp_move_dir = tempfile::tempdir_in(temp_dir.path()).map_err(|e| {
+                VerificationError::Source(format!("Failed to create temp directory: {e}"))
+            })?;
 
             std::fs::rename(&path, temp_move_dir.path().join("content"))
                 .map_err(|e| VerificationError::Source(format!("Failed to move directory: {e}")))?;
 
             for entry in std::fs::read_dir(temp_move_dir.path().join("content"))
-                .map_err(|e| VerificationError::Source(format!("Failed to read directory: {e}")))? 
+                .map_err(|e| VerificationError::Source(format!("Failed to read directory: {e}")))?
             {
                 let entry = entry
                     .map_err(|e| VerificationError::Source(format!("Failed to read entry: {e}")))?;
@@ -244,8 +260,7 @@ async fn normalize_archive_structure(temp_dir: &TempDir) -> Result<(), Verificat
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use flate2::write::GzEncoder;
-    use flate2::Compression;
+    use flate2::{write::GzEncoder, Compression};
     use std::io::Write;
     use tar::Builder;
 
@@ -312,10 +327,16 @@ mod tests {
     #[tokio::test]
     async fn test_detect_format() {
         let tar_gz = create_test_tar_gz();
-        assert!(matches!(detect_archive_format(&tar_gz.as_ref()), Ok(ArchiveFormat::TarGz)));
+        assert!(matches!(
+            detect_archive_format(&tar_gz.as_ref()),
+            Ok(ArchiveFormat::TarGz)
+        ));
 
         let zip = create_test_zip();
-        assert!(matches!(detect_archive_format(&zip.as_ref()), Ok(ArchiveFormat::Zip)));
+        assert!(matches!(
+            detect_archive_format(&zip.as_ref()),
+            Ok(ArchiveFormat::Zip)
+        ));
 
         let invalid = Bytes::from(b"not an archive".to_vec());
         assert!(detect_archive_format(&invalid.as_ref()).is_err());

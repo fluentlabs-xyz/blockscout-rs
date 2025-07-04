@@ -18,7 +18,7 @@ fn compile(
         .bytes(["."])
         .btree_map(["."])
         .type_attribute(".", "#[actix_prost_macros::serde(rename_all=\"snake_case\")]") 
-        .field_attribute( 
+        .field_attribute(
             ".blockscout.fluentVerifier.v1.HealthCheckRequest.service",
             "#[serde(default)]"
         );

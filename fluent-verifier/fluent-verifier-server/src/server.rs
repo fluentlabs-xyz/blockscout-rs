@@ -1,10 +1,11 @@
 use crate::{
     proto::{
-        health_actix::route_health, health_server::HealthServer,
+        health_actix::route_health,
+        health_server::HealthServer,
         wasm_verifier_actix::route_wasm_verifier, // http
         wasm_verifier_server::WasmVerifierServer, // grpc
     },
-    services::{HealthService, FluentWasmVerifierService},
+    services::{FluentWasmVerifierService, HealthService},
     settings::Settings,
 };
 use blockscout_service_launcher::{launcher, launcher::LaunchSettings, tracing};
@@ -29,9 +30,7 @@ impl Router {
 impl launcher::HttpRouter for Router {
     fn register_routes(&self, service_config: &mut actix_web::web::ServiceConfig) {
         service_config.configure(|config| route_health(config, self.health.clone()));
-        service_config.configure(|config| {
-            route_wasm_verifier(config, self.wasm_verifier.clone())
-        });
+        service_config.configure(|config| route_wasm_verifier(config, self.wasm_verifier.clone()));
     }
 }
 

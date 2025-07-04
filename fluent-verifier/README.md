@@ -11,6 +11,7 @@ TODO: this is codegenerated text, change it and provide description of service
 ```bash
 just
 ```
+
 + Start dev postgres service by just typing
 
 ```bash
@@ -18,6 +19,7 @@ just start-postgres
 ```
 
 + Now you ready to start API server! Just run it:
+
 ```
 just run
 ```

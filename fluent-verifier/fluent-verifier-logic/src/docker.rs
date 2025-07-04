@@ -1,5 +1,5 @@
 //! Docker orchestration for smart contract verification using pre-built images
-//! 
+//!
 //! This module provides functionality to:
 //! - Pull versioned Docker images from ghcr.io
 //! - Run contract verification in isolated containers
@@ -7,8 +7,10 @@
 
 use crate::error::VerificationError;
 use bollard::{
-    container::{self, AttachContainerOptions, CreateContainerOptions, LogOutput, UploadToContainerOptions},
-    image::{CreateImageOptions},
+    container::{
+        self, AttachContainerOptions, CreateContainerOptions, LogOutput, UploadToContainerOptions,
+    },
+    image::CreateImageOptions,
     models::HostConfig,
     Docker,
 };
@@ -22,7 +24,7 @@ use uuid::Uuid;
 const WORKDIR: &str = "/workspace";
 const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
 const MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
-// const DEFAULT_TIMEOUT: u64 = 120; // 2 minutes - Reserved for future use
+                                                  // const DEFAULT_TIMEOUT: u64 = 120; // 2 minutes - Reserved for future use
 
 /// CLI output structure matching fluentbase's JSON format
 #[derive(Debug, Deserialize, Serialize)]
@@ -54,10 +56,9 @@ pub async fn run_verification(
 
     // Format image name with SDK version tag
     let image_name = format!("{BASE_IMAGE_NAME}:{sdk_version}");
-    
+
     // Pull image if needed
-    pull_image_if_needed(docker, &image_name)
-        .await?;
+    pull_image_if_needed(docker, &image_name).await?;
 
     // Build verification command
     let command = build_verify_command(
@@ -69,16 +70,13 @@ pub async fn run_verification(
     );
 
     // Create container
-    let container_id = create_container(docker, &image_name, &command)
-        .await?;
+    let container_id = create_container(docker, &image_name, &command).await?;
 
     // Copy source directory to container
-    copy_directory_to_container(docker, &container_id, source_dir)
-        .await?;
+    copy_directory_to_container(docker, &container_id, source_dir).await?;
 
     // Run container and get output
-    let output = run_container(docker, &container_id)
-        .await?;
+    let output = run_container(docker, &container_id).await?;
 
     // Parse and return results
     parse_cli_output(&output)
@@ -92,8 +90,13 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
             info!("Using existing Docker image: {}", image_name);
             return Ok(());
         }
-        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
-            info!("Image {} not found locally, pulling from registry", image_name);
+        Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404, ..
+        }) => {
+            info!(
+                "Image {} not found locally, pulling from registry",
+                image_name
+            );
         }
         Err(e) => {
             return Err(VerificationError::Docker(format!(
@@ -109,7 +112,7 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
     };
 
     let mut stream = docker.create_image(Some(options), None, None);
-    
+
     while let Some(result) = stream.next().await {
         match result {
             Ok(info) => {
@@ -168,7 +171,7 @@ fn build_verify_command(
 
     // Log the command for debugging
     info!("Verification command: {:?}", cmd);
-    
+
     cmd
 }
 
@@ -180,7 +183,7 @@ async fn create_container(
 ) -> Result<String, VerificationError> {
     let container_suffix = Uuid::new_v4();
     let container_name = format!("fluent-verify-{container_suffix}");
-    
+
     debug!("Creating container: {}", container_name);
 
     let options = CreateContainerOptions {
@@ -239,7 +242,7 @@ async fn copy_directory_to_container(
 /// Run container and collect output
 async fn run_container(docker: &Docker, container_id: &str) -> Result<String, VerificationError> {
     info!("Starting container: {}", container_id);
-    
+
     // Start container
     docker
         .start_container::<String>(container_id, None)
@@ -282,13 +285,11 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
     // Convert output to string
     let output = stdout_output
         .into_iter()
-        .filter_map(|bytes| {
-            match str::from_utf8(&bytes) {
-                Ok(s) => Some(s.to_string()),
-                Err(err) => {
-                    warn!("Failed to convert output to UTF-8: {}", err);
-                    None
-                }
+        .filter_map(|bytes| match str::from_utf8(&bytes) {
+            Ok(s) => Some(s.to_string()),
+            Err(err) => {
+                warn!("Failed to convert output to UTF-8: {}", err);
+                None
             }
         })
         .collect::<Vec<_>>()
@@ -318,27 +319,26 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
 fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
     // Log the raw output for debugging
     debug!("Raw container output: {}", output);
-    
+
     // The CLI outputs JSON when verification completes
     // Try to parse the entire output as JSON first
     match serde_json::from_str::<CliOutput>(output) {
         Ok(result) => Ok(result),
         Err(e) => {
             debug!("Failed to parse output as JSON directly: {}", e);
-            
+
             // If that fails, try to find JSON in the output
             let json_start = output.find('{');
             let json_end = output.rfind('}');
-            
+
             if let (Some(start), Some(end)) = (json_start, json_end) {
                 let json_str = &output[start..=end];
                 debug!("Attempting to parse JSON substring: {}", json_str);
-                
-                serde_json::from_str(json_str)
-                    .map_err(|e| {
-                        warn!("Failed to parse JSON substring: {}", e);
-                        VerificationError::Json(e)
-                    })
+
+                serde_json::from_str(json_str).map_err(|e| {
+                    warn!("Failed to parse JSON substring: {}", e);
+                    VerificationError::Json(e)
+                })
             } else {
                 // If no JSON found, the command might have failed
                 // Check if output contains error indicators
@@ -348,7 +348,7 @@ fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
                     )))
                 } else if output.is_empty() {
                     Err(VerificationError::Docker(
-                        "No output from verification command".to_string()
+                        "No output from verification command".to_string(),
                     ))
                 } else {
                     Err(VerificationError::Docker(format!(
@@ -365,11 +365,11 @@ fn build_tar_from_directory(dir: &Path) -> Result<Vec<u8>, VerificationError> {
     let mut tar = tar::Builder::new(Vec::new());
     tar.append_dir_all("", dir)
         .map_err(|e| VerificationError::Docker(format!("Failed to append directory: {e}")))?;
-    
+
     let uncompressed = tar
         .into_inner()
         .map_err(|e| VerificationError::Docker(format!("Failed to finalize tar: {e}")))?;
-    
+
     compress_archive(&uncompressed)
 }
 
@@ -407,11 +407,11 @@ mod tests {
         assert!(cmd.contains(&"mainnet".to_string()));
     }
 
-    #[test] 
+    #[test]
     fn test_build_verify_command_no_features() {
         let cmd = build_verify_command(
             "0x1234567890123456789012345678901234567890",
-            "9999", 
+            "9999",
             "https://mainnet.fluent.xyz",
             &vec![],
             false,

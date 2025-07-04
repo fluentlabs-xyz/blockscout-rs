@@ -11,8 +11,8 @@
 
 mod docker;
 mod error;
-mod verify;
 mod source;
+mod verify;
 
 // Import proto types
 use fluent_verifier_proto::blockscout::fluent_verifier::v1 as proto;
@@ -22,23 +22,18 @@ pub use error::VerificationError;
 pub use verify::verify_contract;
 
 // Re-export proto types for convenience
-pub use proto::{
-    VerifyWasmRequest, 
-    VerifyWasmResponse,
-    VerificationStatus,
-};
-
+pub use proto::{VerificationStatus, VerifyWasmRequest, VerifyWasmResponse};
 
 // Helper function to connect to Docker
 pub async fn connect_docker(url: &str) -> Result<bollard::Docker, VerificationError> {
     use bollard::Docker;
-    
+
     let docker = if url.starts_with("unix://") {
         Docker::connect_with_local(url, 120, bollard::API_DEFAULT_VERSION)
     } else {
         Docker::connect_with_http(url, 120, bollard::API_DEFAULT_VERSION)
     }?;
-    
+
     docker.ping().await?;
     Ok(docker)
 }

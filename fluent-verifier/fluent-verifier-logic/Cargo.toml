@@ -23,7 +23,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process"] }
-tokio-test = {workspace = true}
+tokio-test = { workspace = true }
 toml = { workspace = true }
 walkdir = { workspace = true }
 tempfile = { workspace = true }
@@ -31,6 +31,6 @@ tonic = { workspace = true }
 zip = { workspace = true }
 
 [dev-dependencies]
-blockscout-service-launcher = { version = "0.9.0"}
+blockscout-service-launcher = { version = "0.9.0" }
 pretty_assertions = "1.3"
 
