@@ -24,9 +24,9 @@ on:
         type: string
     secrets:
       ARM_RUNNER_HOSTNAME:
-        required: true
+        required: false
       ARM_RUNNER_KEY:
-        required: true
+        required: false
     outputs:
       tag-value:
         description: 'A semver compatible version retrieved from the tag'
