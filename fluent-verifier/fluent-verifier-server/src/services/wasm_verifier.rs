@@ -50,14 +50,14 @@ impl WasmVerifier for FluentWasmVerifierService {
         validate_verification_request(&proto_request)
             .map_err(|e| {
                 tracing::error!(%request_id, error = %e, "Invalid request");
-                TonicStatus::invalid_argument(format!("Invalid request: {}", e))
+                TonicStatus::invalid_argument(format!("Invalid request: {e}"))
             })?;
 
         // Run verification
         let verification_result = verify_contract(&self.docker, proto_request).await
             .map_err(|e| {
                 tracing::error!(%request_id, error = %e, "Verification error");
-                TonicStatus::internal(format!("Verification failed: {}", e))
+                TonicStatus::internal(format!("Verification failed: {e}"))
             })?;
 
         tracing::info!(

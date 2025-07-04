@@ -36,6 +36,7 @@ pub struct CliOutput {
 }
 
 /// Main entry point for Docker-based verification
+#[allow(clippy::too_many_arguments)]
 pub async fn run_verification(
     docker: &Docker,
     source_dir: &Path,
@@ -52,7 +53,7 @@ pub async fn run_verification(
     );
 
     // Format image name with SDK version tag
-    let image_name = format!("{}:{}", BASE_IMAGE_NAME, sdk_version);
+    let image_name = format!("{BASE_IMAGE_NAME}:{sdk_version}");
     
     // Pull image if needed
     pull_image_if_needed(docker, &image_name)
@@ -96,8 +97,7 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
         }
         Err(e) => {
             return Err(VerificationError::Docker(format!(
-                "Failed to inspect image: {}",
-                e
+                "Failed to inspect image: {e}"
             )));
         }
     }
@@ -118,15 +118,13 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
                 }
                 if let Some(error) = info.error {
                     return Err(VerificationError::Docker(format!(
-                        "Error pulling image {}: {}",
-                        image_name, error
+                        "Error pulling image {image_name}: {error}"
                     )));
                 }
             }
             Err(e) => {
                 return Err(VerificationError::Docker(format!(
-                    "Failed to pull image {}: {}. Make sure the SDK version exists in the registry.",
-                    image_name, e
+                    "Failed to pull image {image_name}: {e}. Make sure the SDK version exists in the registry."
                 )));
             }
         }
@@ -181,14 +179,13 @@ async fn create_container(
     command: &[String],
 ) -> Result<String, VerificationError> {
     let container_suffix = Uuid::new_v4();
-    let container_name = format!("fluent-verify-{}", container_suffix);
+    let container_name = format!("fluent-verify-{container_suffix}");
     
     debug!("Creating container: {}", container_name);
 
     let options = CreateContainerOptions {
         name: container_name.clone(),
         platform: Some("linux/amd64".to_string()),
-        ..Default::default()
     };
 
     let cmd_refs: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
@@ -210,7 +207,7 @@ async fn create_container(
     let container = docker
         .create_container(Some(options), config)
         .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to create container: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to create container: {e}")))?;
 
     Ok(container.id)
 }
@@ -224,7 +221,7 @@ async fn copy_directory_to_container(
     debug!("Copying source from: {:?}", dir);
 
     let tar = build_tar_from_directory(dir)
-        .map_err(|e| VerificationError::Docker(format!("Failed to build tar: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to build tar: {e}")))?;
 
     let options = UploadToContainerOptions {
         path: WORKDIR,
@@ -234,7 +231,7 @@ async fn copy_directory_to_container(
     docker
         .upload_to_container(container_id, Some(options), tar.into())
         .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to upload to container: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to upload to container: {e}")))?;
 
     Ok(())
 }
@@ -247,7 +244,7 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
     docker
         .start_container::<String>(container_id, None)
         .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to start container: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to start container: {e}")))?;
 
     // Attach to container to get output
     let mut attach_results = docker
@@ -262,7 +259,7 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
             }),
         )
         .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to attach to container: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to attach to container: {e}")))?;
 
     let mut stdout_output = vec![];
     let mut stderr_output = vec![];
@@ -276,8 +273,7 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
             },
             Err(err) => {
                 return Err(VerificationError::Docker(format!(
-                    "Error reading container output: {}",
-                    err
+                    "Error reading container output: {err}"
                 )));
             }
         }
@@ -348,8 +344,7 @@ fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
                 // Check if output contains error indicators
                 if output.contains("error") || output.contains("Error") {
                     Err(VerificationError::Docker(format!(
-                        "Command failed with output: {}",
-                        output
+                        "Command failed with output: {output}"
                     )))
                 } else if output.is_empty() {
                     Err(VerificationError::Docker(
@@ -357,8 +352,7 @@ fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
                     ))
                 } else {
                     Err(VerificationError::Docker(format!(
-                        "No JSON output found. Raw output: {}",
-                        output
+                        "No JSON output found. Raw output: {output}"
                     )))
                 }
             }
@@ -370,11 +364,11 @@ fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
 fn build_tar_from_directory(dir: &Path) -> Result<Vec<u8>, VerificationError> {
     let mut tar = tar::Builder::new(Vec::new());
     tar.append_dir_all("", dir)
-        .map_err(|e| VerificationError::Docker(format!("Failed to append directory: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to append directory: {e}")))?;
     
     let uncompressed = tar
         .into_inner()
-        .map_err(|e| VerificationError::Docker(format!("Failed to finalize tar: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to finalize tar: {e}")))?;
     
     compress_archive(&uncompressed)
 }
@@ -384,10 +378,10 @@ fn compress_archive(uncompressed: &[u8]) -> Result<Vec<u8>, VerificationError> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(uncompressed)
-        .map_err(|e| VerificationError::Docker(format!("Failed to compress: {}", e)))?;
+        .map_err(|e| VerificationError::Docker(format!("Failed to compress: {e}")))?;
     encoder
         .finish()
-        .map_err(|e| VerificationError::Docker(format!("Failed to finish compression: {}", e)))
+        .map_err(|e| VerificationError::Docker(format!("Failed to finish compression: {e}")))
 }
 
 #[cfg(test)]

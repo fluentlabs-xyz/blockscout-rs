@@ -7,6 +7,7 @@ use serde::Deserialize;
 // Main settings structure for the Fluent Verifier service.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct Settings {
     pub server: ServerSettings,
     pub metrics: MetricsSettings,
@@ -33,18 +34,6 @@ impl ConfigSettings for Settings {
 }
 
 // Implementing Default trait for the main Settings struct.
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            server: Default::default(),
-            metrics: Default::default(),
-            tracing: Default::default(),
-            jaeger: Default::default(),
-            docker_api: Default::default(),
-            verification: Default::default(),
-        }
-    }
-}
 
 // Settings for connecting to the Docker API.
 #[derive(Debug, Deserialize, Clone, PartialEq, Eq)]

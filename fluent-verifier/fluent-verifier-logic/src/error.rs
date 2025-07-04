@@ -31,12 +31,12 @@ impl From<git2::Error> for VerificationError {
     fn from(err: git2::Error) -> Self {
         match err.code() {
             git2::ErrorCode::NotFound => {
-                VerificationError::Source(format!("Repository or reference not found: {}", err))
+                VerificationError::Source(format!("Repository or reference not found: {err}"))
             }
             git2::ErrorCode::Auth => {
-                VerificationError::Source(format!("Authentication failed: {}", err))
+                VerificationError::Source(format!("Authentication failed: {err}"))
             }
-            _ => VerificationError::Source(format!("Git error: {}", err)),
+            _ => VerificationError::Source(format!("Git error: {err}")),
         }
     }
 }

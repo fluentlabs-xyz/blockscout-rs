@@ -66,8 +66,7 @@ pub async fn verify_contract(
         return Ok(VerifyWasmResponse {
             status: VerificationStatus::StatusBytecodeMismatch as i32,
             error_message: format!(
-                "Bytecode mismatch. Expected: {}, Actual: {}", 
-                expected_hash, actual_hash
+                "Bytecode mismatch. Expected: {expected_hash}, Actual: {actual_hash}"
             ),
             result: None,
         });

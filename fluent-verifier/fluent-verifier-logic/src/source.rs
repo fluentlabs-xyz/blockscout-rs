@@ -37,7 +37,7 @@ pub async fn prepare_source_from_git(
     
     // Validate URL
     let url = Url::parse(&git.repository_url)
-        .map_err(|e| VerificationError::InvalidRequest(format!("Invalid git URL: {}", e)))?;
+        .map_err(|e| VerificationError::InvalidRequest(format!("Invalid git URL: {e}")))?;
     
     if !matches!(url.scheme(), "https" | "http") {
         return Err(VerificationError::InvalidRequest(
@@ -57,7 +57,7 @@ pub async fn prepare_source_from_git(
             ));
         }
         Err(err) => {
-            return Err(VerificationError::Source(format!("Failed to clone repository: {}", err)));
+            return Err(VerificationError::Source(format!("Failed to clone repository: {err}")));
         }
     };
     
@@ -70,7 +70,7 @@ pub async fn prepare_source_from_git(
     
     let obj = repo.revparse_single(commit_ref)
         .map_err(|_| VerificationError::Source(
-            format!("Commit/branch '{}' not found", commit_ref)
+            format!("Commit/branch '{commit_ref}' not found")
         ))?;
     
     repo.checkout_tree(&obj, None)?;
@@ -169,7 +169,7 @@ async fn extract_tar_gz(content: &[u8], temp_dir: &TempDir) -> Result<(), Verifi
 
     archive
         .unpack(temp_dir.path())
-        .map_err(|e| VerificationError::Source(format!("Extraction failed: {}", e)))?;
+        .map_err(|e| VerificationError::Source(format!("Extraction failed: {e}")))?;
 
     Ok(())
 }
@@ -177,30 +177,30 @@ async fn extract_tar_gz(content: &[u8], temp_dir: &TempDir) -> Result<(), Verifi
 async fn extract_zip(content: &[u8], temp_dir: &TempDir) -> Result<(), VerificationError> {
     let reader = std::io::Cursor::new(content);
     let mut zip = ZipArchive::new(reader)
-        .map_err(|e| VerificationError::Source(format!("Failed to read ZIP archive: {}", e)))?;
+        .map_err(|e| VerificationError::Source(format!("Failed to read ZIP archive: {e}")))?;
 
     for i in 0..zip.len() {
         let mut file = zip
             .by_index(i)
-            .map_err(|e| VerificationError::Source(format!("Failed to read ZIP entry: {}", e)))?;
+            .map_err(|e| VerificationError::Source(format!("Failed to read ZIP entry: {e}")))?;
 
         let path = file.mangled_name();
         let dest_path = temp_dir.path().join(&path);
 
         if file.is_dir() {
             std::fs::create_dir_all(&dest_path)
-                .map_err(|e| VerificationError::Source(format!("Failed to create directory: {}", e)))?;
+                .map_err(|e| VerificationError::Source(format!("Failed to create directory: {e}")))?;
         } else {
             if let Some(parent) = dest_path.parent() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| VerificationError::Source(format!("Failed to create parent directory: {}", e)))?;
+                    .map_err(|e| VerificationError::Source(format!("Failed to create parent directory: {e}")))?;
             }
 
             let mut dest_file = std::fs::File::create(&dest_path)
-                .map_err(|e| VerificationError::Source(format!("Failed to create file: {}", e)))?;
+                .map_err(|e| VerificationError::Source(format!("Failed to create file: {e}")))?;
 
             std::io::copy(&mut file, &mut dest_file)
-                .map_err(|e| VerificationError::Source(format!("Failed to extract file: {}", e)))?;
+                .map_err(|e| VerificationError::Source(format!("Failed to extract file: {e}")))?;
         }
     }
 
@@ -209,9 +209,9 @@ async fn extract_zip(content: &[u8], temp_dir: &TempDir) -> Result<(), Verificat
 
 async fn normalize_archive_structure(temp_dir: &TempDir) -> Result<(), VerificationError> {
     let entries: Vec<_> = std::fs::read_dir(temp_dir.path())
-        .map_err(|e| VerificationError::Source(format!("Failed to read directory: {}", e)))?
+        .map_err(|e| VerificationError::Source(format!("Failed to read directory: {e}")))?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| VerificationError::Source(format!("Failed to read directory entry: {}", e)))?;
+        .map_err(|e| VerificationError::Source(format!("Failed to read directory entry: {e}")))?;
 
     if entries.len() == 1 {
         let entry = &entries[0];
@@ -219,20 +219,20 @@ async fn normalize_archive_structure(temp_dir: &TempDir) -> Result<(), Verificat
 
         if path.is_dir() && path.join("Cargo.toml").exists() {
             let temp_move_dir = tempfile::tempdir_in(temp_dir.path())
-                .map_err(|e| VerificationError::Source(format!("Failed to create temp directory: {}", e)))?;
+                .map_err(|e| VerificationError::Source(format!("Failed to create temp directory: {e}")))?;
 
             std::fs::rename(&path, temp_move_dir.path().join("content"))
-                .map_err(|e| VerificationError::Source(format!("Failed to move directory: {}", e)))?;
+                .map_err(|e| VerificationError::Source(format!("Failed to move directory: {e}")))?;
 
             for entry in std::fs::read_dir(temp_move_dir.path().join("content"))
-                .map_err(|e| VerificationError::Source(format!("Failed to read directory: {}", e)))? 
+                .map_err(|e| VerificationError::Source(format!("Failed to read directory: {e}")))? 
             {
                 let entry = entry
-                    .map_err(|e| VerificationError::Source(format!("Failed to read entry: {}", e)))?;
+                    .map_err(|e| VerificationError::Source(format!("Failed to read entry: {e}")))?;
                 let dest = temp_dir.path().join(entry.file_name());
 
                 std::fs::rename(entry.path(), dest)
-                    .map_err(|e| VerificationError::Source(format!("Failed to move file: {}", e)))?;
+                    .map_err(|e| VerificationError::Source(format!("Failed to move file: {e}")))?;
             }
         }
     }
