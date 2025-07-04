@@ -394,7 +394,7 @@ mod tests {
             "0x1234567890123456789012345678901234567890",
             "9999",
             "https://mainnet.fluent.xyz",
-            &vec!["mainnet".to_string()],
+            &["mainnet".to_string()],
             false,
         );
 
@@ -413,7 +413,7 @@ mod tests {
             "0x1234567890123456789012345678901234567890",
             "9999",
             "https://mainnet.fluent.xyz",
-            &vec![],
+            &[],
             false,
         );
 
@@ -426,7 +426,7 @@ mod tests {
             "0x1234567890123456789012345678901234567890",
             "9999",
             "https://mainnet.fluent.xyz",
-            &vec![],
+            &[],
             true,
         );
 

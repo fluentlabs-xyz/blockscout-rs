@@ -328,18 +328,18 @@ mod tests {
     async fn test_detect_format() {
         let tar_gz = create_test_tar_gz();
         assert!(matches!(
-            detect_archive_format(&tar_gz.as_ref()),
+            detect_archive_format(tar_gz.as_ref()),
             Ok(ArchiveFormat::TarGz)
         ));
 
         let zip = create_test_zip();
         assert!(matches!(
-            detect_archive_format(&zip.as_ref()),
+            detect_archive_format(zip.as_ref()),
             Ok(ArchiveFormat::Zip)
         ));
 
         let invalid = Bytes::from(b"not an archive".to_vec());
-        assert!(detect_archive_format(&invalid.as_ref()).is_err());
+        assert!(detect_archive_format(invalid.as_ref()).is_err());
     }
 
     #[tokio::test]
