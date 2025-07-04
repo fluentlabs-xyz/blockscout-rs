@@ -8,9 +8,9 @@ http:
       post: /api/v1/fluent/verify-wasm # HTTP POST endpoint for wasm verification
       body: "*" # Indicates that the entire request body is mapped to the gRPC request message
 
-    - selector: blockscout.fluentVerifier.v1.WasmVerifier.ListSupportedVersions
-      get: /api/v1/fluent/supported-versions # HTTP GET endpoint for supported versions
+    - selector: blockscout.fluentVerifier.v1.WasmVerifier.ListAvailableVersions
+      get: /api/v1/fluent/available-versions # HTTP GET endpoint for available SDK versions
 
     # Rules for Health service
     - selector: blockscout.fluentVerifier.v1.Health.Check
-      get: /health 
+      get: /health

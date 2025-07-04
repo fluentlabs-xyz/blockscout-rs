@@ -39,7 +39,7 @@ pub async fn run(settings: Settings) -> Result<(), anyhow::Error> {
     tracing::init_logs(SERVICE_NAME, &settings.tracing, &settings.jaeger)?;
 
     let health = Arc::new(HealthService::default());
-    let wasm_verifier = Arc::new(FluentWasmVerifierService::new(settings.docker_api, settings.verification).await?);
+    let wasm_verifier = Arc::new(FluentWasmVerifierService::new(settings.docker_api).await?);
 
     let router = Router {
         health,

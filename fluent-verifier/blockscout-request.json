@@ -8,7 +8,6 @@
   "compile_settings": {
     "rustc_version": "rustc 1.87.0",
     "fluentbase_sdk_version": "v0.1.0",
-    "profile": "release",
     "features": [],
     "no_default_features": true
   }

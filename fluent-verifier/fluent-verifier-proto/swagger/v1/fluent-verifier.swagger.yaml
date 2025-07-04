@@ -10,24 +10,30 @@ consumes:
 produces:
   - application/json
 paths:
-  /api/v1/fluent/supported-versions:
+  /api/v1/fluent/available-versions:
     get:
-      summary: Lists supported compiler and SDK versions
-      operationId: WasmVerifier_ListSupportedVersions
+      summary: Lists available SDK versions (Docker image tags)
+      operationId: WasmVerifier_ListAvailableVersions
       responses:
         "200":
           description: A successful response.
           schema:
-            $ref: '#/definitions/v1ListSupportedVersionsResponse'
+            $ref: '#/definitions/v1ListAvailableVersionsResponse'
         default:
           description: An unexpected error response.
           schema:
             $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: include_prerelease
+          description: 'Optional: include pre-release versions'
+          in: query
+          required: false
+          type: boolean
       tags:
         - WasmVerifier
   /api/v1/fluent/verify-wasm:
     post:
-      summary: Verifies a WASM contract using fluent-compiler CLI
+      summary: Verifies a WASM contract using fluentbase CLI
       operationId: WasmVerifier_VerifyWasm
       responses:
         "200":
@@ -113,33 +119,23 @@ definitions:
   v1CompileSettings:
     type: object
     properties:
-      rustc_version:
-        type: string
-        title: |-
-          Rust compiler version (required)
-          e.g., "1.75.0" or "rustc 1.75.0 (82e1608df 2023-12-21)"
-          The service will parse and match the version
       sdk_version:
         type: string
         title: |-
-          Fluentbase SDK version (required)
-          Must be a semantic version, e.g., "0.5.0"
-      profile:
-        type: string
-        title: |-
-          Build profile: "release", "debug", or custom
-          If empty, defaults to "release"
+          SDK version (Docker image tag) - REQUIRED
+          This determines which pre-built Docker image to use
+          Examples: "v0.2.1-dev", "v0.3.0", "latest"
       features:
         type: array
         items:
           type: string
         title: |-
           Cargo features to enable
-          Empty list means no additional features
+          Example: ["mainnet", "testnet"]
       no_default_features:
         type: boolean
         title: Disable default features
-    title: Compilation settings (all fields required)
+    title: Simplified compilation settings
   v1GitSource:
     type: object
     properties:
@@ -164,66 +160,48 @@ definitions:
     properties:
       status:
         $ref: '#/definitions/HealthCheckResponseServingStatus'
-  v1ListSupportedVersionsResponse:
+  v1ListAvailableVersionsResponse:
     type: object
     properties:
-      rustc_versions:
-        type: array
-        items:
-          type: string
-        title: |-
-          Supported Rust compiler versions
-          e.g., ["1.75.0", "1.76.0", "1.77.0"]
       sdk_versions:
         type: array
         items:
           type: string
         title: |-
-          Supported Fluentbase SDK versions
-          e.g., ["0.5.0", "0.5.1", "0.6.0"]
-      default_rustc_version:
+          Available SDK versions (Docker image tags)
+          e.g., ["v0.2.1-dev", "v0.3.0", "v0.3.1", "latest"]
+      latest_stable:
         type: string
-        title: Default versions (used if service cannot determine from source)
-      default_sdk_version:
-        type: string
-    title: Response with supported versions
-  v1VerificationMetadata:
-    type: object
-    properties:
-      deployed_bytecode_hash:
-        type: string
-        title: Bytecode hash of deployed contract
-      compiled_bytecode_hash:
-        type: string
-        title: Bytecode hash from compilation
-      compiler_version_full:
-        type: string
-        title: |-
-          Full compiler version string actually used
-          e.g., "rustc 1.75.0 (82e1608df 2023-12-21)"
-      sdk_version_used:
-        type: string
-        title: SDK version actually used
-      verified_at:
-        type: string
-        format: uint64
-        title: Verification timestamp (Unix seconds)
-    title: Additional verification metadata
+        title: Recommended/latest stable version
+    title: Response with available SDK versions
   v1VerificationResult:
     type: object
     properties:
       contract_address:
         type: string
-        title: Contract address (echoed from request)
+        title: Context (echoed from request for debugging/logging)
       chain_id:
         type: string
-        title: Chain ID (echoed from request)
-      abi_json:
+      expected_hash:
         type: string
-        title: Contract ABI as JSON string
-      compile_settings_used:
+        description: Hash from blockchain
+        title: Hash comparison results
+      actual_hash:
+        type: string
+        title: Hash from compilation
+      compile_settings:
         $ref: '#/definitions/v1CompileSettings'
-        title: Compilation settings that were actually used
+        title: Compilation settings used (for reproducibility)
+      rustc_version:
+        type: string
+        description: e.g., "rustc 1.87.0 (17067e9ac 2025-05-09)"
+        title: Compilation environment info
+      sdk_version:
+        type: string
+        title: 'Full version: "0.1.0-1c0a988d0e5a0ce3015084d53ffa85d5450c3eac"'
+      build_platform:
+        type: string
+        title: e.g., "docker:linux-x86_64"
       source_files:
         type: object
         additionalProperties:
@@ -231,9 +209,6 @@ definitions:
         title: |-
           Source files that were compiled
           Map: relative path -> content
-      metadata:
-        $ref: '#/definitions/v1VerificationMetadata'
-        title: Additional metadata
     title: Successful verification result
   v1VerificationStatus:
     type: string
@@ -244,7 +219,7 @@ definitions:
       - STATUS_COMPILATION_FAILED
       - STATUS_INVALID_SOURCE
       - STATUS_NETWORK_ERROR
-      - STATUS_UNSUPPORTED_VERSION
+      - STATUS_INVALID_SDK_VERSION
       - STATUS_ERROR
     default: STATUS_UNSPECIFIED
     description: |-
@@ -254,7 +229,7 @@ definitions:
        - STATUS_COMPILATION_FAILED: Compilation failed
        - STATUS_INVALID_SOURCE: Invalid source or configuration
        - STATUS_NETWORK_ERROR: Network or RPC error
-       - STATUS_UNSUPPORTED_VERSION: Unsupported compiler or SDK version
+       - STATUS_INVALID_SDK_VERSION: SDK version not found (Docker image doesn't exist)
        - STATUS_ERROR: Other error (see error_message)
     title: Verification status enum
   v1VerifyWasmRequest:
@@ -283,9 +258,6 @@ definitions:
       status:
         $ref: '#/definitions/v1VerificationStatus'
         title: Verification status
-      contract_name:
-        type: string
-        title: Contract name from Cargo.toml
       error_message:
         type: string
         title: Error message if verification failed

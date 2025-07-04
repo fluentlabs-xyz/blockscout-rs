@@ -3,7 +3,6 @@ use blockscout_service_launcher::{
     tracing::{JaegerSettings, TracingSettings},
 };
 use serde::Deserialize;
-use url::Url;
 
 // Main settings structure for the Fluent Verifier service.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -27,19 +26,6 @@ impl ConfigSettings for Settings {
         }
         if self.verification.job_timeout_seconds == 0 {
             anyhow::bail!("verification.job_timeout_seconds must be greater than 0");
-        }
-        if self.verification.default_rustc_version.is_empty() {
-            anyhow::bail!("verification.default_rustc_version must not be empty");
-        }
-        // Validate default_rustc_version is a valid semver
-        if semver::Version::parse(&self.verification.default_rustc_version).is_err() {
-            anyhow::bail!(
-                "verification.default_rustc_version ('{}') is not a valid semantic version",
-                self.verification.default_rustc_version
-            );
-        }
-        if self.verification.docker_image_prefix.is_empty() {
-            anyhow::bail!("verification.docker_image_prefix must not be empty");
         }
 
         Ok(())
@@ -65,14 +51,14 @@ impl Default for Settings {
 #[serde(default, deny_unknown_fields)]
 pub struct DockerApiSettings {
     /// Address of the Docker API endpoint.
-    pub addr: Url,
+    /// Examples: "unix:///var/run/docker.sock" or "tcp://localhost:2375"
+    pub addr: String,
 }
 
 impl Default for DockerApiSettings {
     fn default() -> Self {
         Self {
-            addr: Url::parse("unix:///var/run/docker.sock")
-                .expect("Default Docker API URL should be valid"),
+            addr: "unix:///var/run/docker.sock".to_string(),
         }
     }
 }
@@ -83,31 +69,16 @@ impl Default for DockerApiSettings {
 pub struct VerificationSettings {
     /// Maximum allowed size for uploaded source code archives in bytes.
     pub max_archive_size_bytes: usize,
+
     /// Timeout for a single verification job in seconds.
     pub job_timeout_seconds: u64,
-    /// List of explicitly supported rustc versions (e.g., "1.75.0", "1.78.0").
-    pub supported_rustc_versions: Vec<String>,
-    /// List of explicitly supported Fluentbase SDK versions (e.g., "0.1.0", "0.2.0").
-    pub supported_fluentbase_sdk_versions: Vec<String>,
-    /// Default rustc version to use if not specified by user.
-    pub default_rustc_version: String,
-    /// Prefix for Docker images used for compilation.
-    pub docker_image_prefix: String,
 }
 
 impl Default for VerificationSettings {
     fn default() -> Self {
         Self {
-            max_archive_size_bytes: 20 * 1024 * 1024, // 20MB
+            max_archive_size_bytes: 50 * 1024 * 1024, // 50MB (increased from 20MB)
             job_timeout_seconds: 300,                 // 5 minutes
-            supported_rustc_versions: vec![
-                "1.75.0".to_string(),
-                "1.78.0".to_string(),
-                "1.79.0".to_string(),
-            ],
-            supported_fluentbase_sdk_versions: vec!["0.1.0".to_string(), "0.2.0".to_string()],
-            default_rustc_version: "1.78.0".to_string(),
-            docker_image_prefix: "fluentcompile".to_string(),
         }
     }
 }

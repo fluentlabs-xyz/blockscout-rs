@@ -6,11 +6,11 @@ option go_package = "github.com/blockscout/blockscout-rs/fluent-verifier";
 
 // Service definition for verifying Fluent WASM smart contracts.
 service WasmVerifier {
-  // Verifies a WASM contract using fluent-compiler CLI
+  // Verifies a WASM contract using fluentbase CLI
   rpc VerifyWasm(VerifyWasmRequest) returns (VerifyWasmResponse);
   
-  // Lists supported compiler and SDK versions
-  rpc ListSupportedVersions(ListSupportedVersionsRequest) returns (ListSupportedVersionsResponse);
+  // Lists available SDK versions (Docker image tags)
+  rpc ListAvailableVersions(ListAvailableVersionsRequest) returns (ListAvailableVersionsResponse);
 }
 
 // Request message for contract verification
@@ -59,27 +59,19 @@ message GitSource {
   string project_path = 3;
 }
 
-// Compilation settings (all fields required)
+// Simplified compilation settings
 message CompileSettings {
-  // Rust compiler version (required)
-  // e.g., "1.75.0" or "rustc 1.75.0 (82e1608df 2023-12-21)"
-  // The service will parse and match the version
-  string rustc_version = 1;
-  
-  // Fluentbase SDK version (required)
-  // Must be a semantic version, e.g., "0.5.0"
-  string sdk_version = 2;
-  
-  // Build profile: "release", "debug", or custom
-  // If empty, defaults to "release"
-  string profile = 3;
+  // SDK version (Docker image tag) - REQUIRED
+  // This determines which pre-built Docker image to use
+  // Examples: "v0.2.1-dev", "v0.3.0", "latest"
+  string sdk_version = 1;
   
   // Cargo features to enable
-  // Empty list means no additional features
-  repeated string features = 4;
+  // Example: ["mainnet", "testnet"]
+  repeated string features = 2;
   
   // Disable default features
-  bool no_default_features = 5;
+  bool no_default_features = 3;
 }
 
 // Response message for verification
@@ -87,14 +79,11 @@ message VerifyWasmResponse {
   // Verification status
   VerificationStatus status = 1;
   
-  // Contract name from Cargo.toml
-  string contract_name = 2;
-  
   // Error message if verification failed
-  string error_message = 3;
+  string error_message = 2;
   
   // Verification result (only if successful)
-  VerificationResult result = 4;
+  VerificationResult result = 3;
 }
 
 // Verification status enum
@@ -117,8 +106,8 @@ enum VerificationStatus {
   // Network or RPC error
   STATUS_NETWORK_ERROR = 5;
   
-  // Unsupported compiler or SDK version
-  STATUS_UNSUPPORTED_VERSION = 6;
+  // SDK version not found (Docker image doesn't exist)
+  STATUS_INVALID_SDK_VERSION = 6;
   
   // Other error (see error_message)
   STATUS_ERROR = 7;
@@ -126,59 +115,39 @@ enum VerificationStatus {
 
 // Successful verification result
 message VerificationResult {
-  // Contract address (echoed from request)
+  // Context (echoed from request for debugging/logging)
   string contract_address = 1;
-  
-  // Chain ID (echoed from request)
   string chain_id = 2;
   
-  // Contract ABI as JSON string
-  string abi_json = 3;
+  // Hash comparison results
+  string expected_hash = 3;  // Hash from blockchain
+  string actual_hash = 4;    // Hash from compilation
   
-  // Compilation settings that were actually used
-  CompileSettings compile_settings_used = 4;
+  // Compilation settings used (for reproducibility)
+  CompileSettings compile_settings = 5;
+  
+  // Compilation environment info
+  string rustc_version = 6;  // e.g., "rustc 1.87.0 (17067e9ac 2025-05-09)"
+  string sdk_version = 7;    // Full version: "0.1.0-1c0a988d0e5a0ce3015084d53ffa85d5450c3eac"
+  string build_platform = 8; // e.g., "docker:linux-x86_64"
   
   // Source files that were compiled
   // Map: relative path -> content
-  map<string, string> source_files = 5;
-  
-  // Additional metadata
-  VerificationMetadata metadata = 6;
+  map<string, string> source_files = 9;
 }
 
-// Additional verification metadata
-message VerificationMetadata {
-  // Bytecode hash of deployed contract
-  string deployed_bytecode_hash = 1;
-  
-  // Bytecode hash from compilation
-  string compiled_bytecode_hash = 2;
-  
-  // Full compiler version string actually used
-  // e.g., "rustc 1.75.0 (82e1608df 2023-12-21)"
-  string compiler_version_full = 3;
-  
-  // SDK version actually used  
-  string sdk_version_used = 4;
-  
-  // Verification timestamp (Unix seconds)
-  uint64 verified_at = 5;
+// Request for available SDK versions
+message ListAvailableVersionsRequest {
+  // Optional: include pre-release versions
+  bool include_prerelease = 1;
 }
 
-// Request for supported versions
-message ListSupportedVersionsRequest {}
-
-// Response with supported versions
-message ListSupportedVersionsResponse {
-  // Supported Rust compiler versions
-  // e.g., ["1.75.0", "1.76.0", "1.77.0"]
-  repeated string rustc_versions = 1;
+// Response with available SDK versions
+message ListAvailableVersionsResponse {
+  // Available SDK versions (Docker image tags)
+  // e.g., ["v0.2.1-dev", "v0.3.0", "v0.3.1", "latest"]
+  repeated string sdk_versions = 1;
   
-  // Supported Fluentbase SDK versions
-  // e.g., ["0.5.0", "0.5.1", "0.6.0"]
-  repeated string sdk_versions = 2;
-  
-  // Default versions (used if service cannot determine from source)
-  string default_rustc_version = 3;
-  string default_sdk_version = 4;
+  // Recommended/latest stable version
+  string latest_stable = 2;
 }

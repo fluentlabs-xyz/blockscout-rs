@@ -1,14 +1,14 @@
-//! Docker orchestration for reproducible smart contract verification
+//! Docker orchestration for smart contract verification using pre-built images
 //! 
 //! This module provides functionality to:
-//! - Build versioned Docker images with specific Rust and SDK versions
+//! - Pull versioned Docker images from ghcr.io
 //! - Run contract verification in isolated containers
 //! - Parse and return verification results
 
 use crate::error::VerificationError;
 use bollard::{
     container::{self, AttachContainerOptions, CreateContainerOptions, LogOutput, UploadToContainerOptions},
-    image::{BuildImageOptions, BuilderVersion},
+    image::{CreateImageOptions},
     models::HostConfig,
     Docker,
 };
@@ -20,32 +20,19 @@ use uuid::Uuid;
 
 // Constants
 const WORKDIR: &str = "/workspace";
-const FLUENT_BUILDER_REPO: &str = "https://github.com/fluentlabs-xyz/fluent-builder.git";
-const BASE_IMAGE: &str = "rust:latest";
+const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
 const MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
-const DEFAULT_TIMEOUT: u64 = 120; // 2 minutes
+// const DEFAULT_TIMEOUT: u64 = 120; // 2 minutes - Reserved for future use
 
-/// CLI output structure matching fluent-builder's JSON format
+/// CLI output structure matching fluentbase's JSON format
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "status")]
-pub enum CliOutput {
-    #[serde(rename = "success")]
-    Success {
-        command: String,
-        verified: bool,
-        contract_name: String,
-        expected_hash: String,
-        actual_hash: String,
-        #[serde(default)]
-        abi: Option<serde_json::Value>,
-        compiler_version: String,
-        sdk_version: String,
-    },
-    #[serde(rename = "error")]
-    Error {
-        error_type: String,
-        message: String,
-    },
+pub struct CliOutput {
+    pub verified: bool,
+    pub expected_hash: String,
+    pub actual_hash: String,
+    pub rustc_version: String,
+    pub sdk_version: String,
+    pub build_platform: String,
 }
 
 /// Main entry point for Docker-based verification
@@ -55,252 +42,125 @@ pub async fn run_verification(
     contract_address: &str,
     chain_id: &str,
     rpc_endpoint: &str,
-    rustc_version: &str,
     sdk_version: &str,
-    profile: &str,
     features: &[String],
     no_default_features: bool,
 ) -> Result<CliOutput, VerificationError> {
     info!(
-        "Starting verification for contract {} on chain {}",
-        contract_address, chain_id
+        "Starting verification for contract {} on chain {} with SDK version {}",
+        contract_address, chain_id, sdk_version
     );
 
-    // Ensure Docker image exists
-    let image_name = format_image_name(sdk_version, rustc_version);
+    // Format image name with SDK version tag
+    let image_name = format!("{}:{}", BASE_IMAGE_NAME, sdk_version);
     
-    create_image(docker, &image_name, rustc_version, sdk_version)
-        .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to create image: {}", e)))?;
+    // Pull image if needed
+    pull_image_if_needed(docker, &image_name)
+        .await?;
 
     // Build verification command
     let command = build_verify_command(
         contract_address,
         chain_id,
         rpc_endpoint,
-        profile,
         features,
         no_default_features,
     );
 
     // Create container
     let container_id = create_container(docker, &image_name, &command)
-        .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to create container: {}", e)))?;
+        .await?;
 
     // Copy source directory to container
     copy_directory_to_container(docker, &container_id, source_dir)
-        .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to copy source: {}", e)))?;
+        .await?;
 
     // Run container and get output
     let output = run_container(docker, &container_id)
-        .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to run container: {}", e)))?;
+        .await?;
 
     // Parse and return results
     parse_cli_output(&output)
 }
 
-/// Format Docker image name based on SDK and Rust versions
-fn format_image_name(sdk_version: &str, rust_version: &str) -> String {
-    // Clean version strings for Docker tag compatibility
-    let sdk_tag = sdk_version
-        .trim_start_matches('v')
-        .replace(['/', ':', '\\'], "-");
-    
-    let rust_tag = rust_version
-        .trim_start_matches("rustc ")
-        .split_whitespace()
-        .next()
-        .unwrap_or("unknown")
-        .replace('.', "-");
-
-    format!("fluent-builder:{}-rust-{}", sdk_tag, rust_tag)
-}
-
-/// Check if Docker image exists locally
-async fn image_exists(docker: &Docker, name: &str) -> Result<bool, VerificationError> {
-    match docker.inspect_image(name).await {
-        Ok(_) => Ok(true),
-        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
-            Ok(false)
+/// Pull Docker image if it doesn't exist locally
+async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), VerificationError> {
+    // Check if image exists locally
+    match docker.inspect_image(image_name).await {
+        Ok(_) => {
+            info!("Using existing Docker image: {}", image_name);
+            return Ok(());
         }
-        Err(e) => Err(VerificationError::Docker(format!(
-            "Failed to inspect image: {}",
-            e
-        ))),
-    }
-}
-
-/// Create Docker image if it doesn't exist
-async fn create_image(
-    docker: &Docker,
-    image_name: &str,
-    rust_version: &str,
-    sdk_version: &str,
-) -> Result<(), VerificationError> {
-    if image_exists(docker, image_name).await? {
-        info!("Using existing Docker image: {}", image_name);
-        return Ok(());
+        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
+            info!("Image {} not found locally, pulling from registry", image_name);
+        }
+        Err(e) => {
+            return Err(VerificationError::Docker(format!(
+                "Failed to inspect image: {}",
+                e
+            )));
+        }
     }
 
-    info!(
-        "Building Docker image {} (Rust: {}, SDK: {})",
-        image_name, rust_version, sdk_version
-    );
-
-    // Format Rust toolchain version
-    let toolchain = format_rust_toolchain(rust_version);
-    
-    // Determine SDK checkout command
-    let checkout_cmd = format_sdk_checkout(sdk_version);
-
-    let dockerfile = format!(
-        r#"FROM {BASE_IMAGE}
-
-# Install specific Rust toolchain
-RUN rustup toolchain install {toolchain} && \
-    rustup default {toolchain} && \
-    rustup target add wasm32-unknown-unknown --toolchain {toolchain} && \
-    rustup component add rust-src --toolchain {toolchain}
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
-# Clone and build fluent-builder at specific version
-RUN git clone {FLUENT_BUILDER_REPO} /tmp/fluent-builder && \
-    cd /tmp/fluent-builder && \
-    {checkout_cmd} && \
-    cargo build --release --manifest-path crates/cli/Cargo.toml && \
-    mv target/release/fluent-builder /usr/local/bin/fluent-builder && \
-    rm -rf /tmp/fluent-builder
-
-# Set working directory
-WORKDIR {WORKDIR}
-
-# Mark as fluent-builder Docker image
-ENV FLUENT_BUILDER_DOCKER=1
-
-# Verify installation
-RUN fluent-builder --version
-"#
-    );
-
-    // Create tar archive with Dockerfile
-    let content = build_tar_with_dockerfile(&dockerfile)?;
-
-    // Build image options
-    let build_options = BuildImageOptions {
-        t: image_name.to_string(),
-        dockerfile: "Dockerfile".to_string(),
-        version: BuilderVersion::BuilderV1,
-        networkmode: "host".to_string(),
-        pull: true,
-        rm: true,
-        forcerm: true,
-        platform: "linux/amd64".to_string(),
+    // Pull the image
+    let options = CreateImageOptions {
+        from_image: image_name,
         ..Default::default()
     };
 
-    let mut stream = docker.build_image(build_options, None, Some(content.into()));
-
-    let mut output = vec![];
+    let mut stream = docker.create_image(Some(options), None, None);
+    
     while let Some(result) = stream.next().await {
         match result {
             Ok(info) => {
-                if let Some(value) = info.stream {
-                    trace!(image_name = image_name, value = value, "building an image");
-                    output.push(value);
+                if let Some(status) = info.status {
+                    trace!("Pull status: {}", status);
+                }
+                if let Some(error) = info.error {
+                    return Err(VerificationError::Docker(format!(
+                        "Error pulling image {}: {}",
+                        image_name, error
+                    )));
                 }
             }
-            Err(bollard::errors::Error::DockerStreamError { error }) => {
-                output.push(error);
-                let output = output.join("");
+            Err(e) => {
                 return Err(VerificationError::Docker(format!(
-                    "Build error for image {}: {}",
-                    image_name, output
-                )));
-            }
-            Err(err) => {
-                let output = output.join("");
-                return Err(VerificationError::Docker(format!(
-                    "Unknown error building image {}: {} (output: {})",
-                    image_name, err, output
+                    "Failed to pull image {}: {}. Make sure the SDK version exists in the registry.",
+                    image_name, e
                 )));
             }
         }
     }
 
-    info!("Successfully built Docker image: {}", image_name);
+    info!("Successfully pulled Docker image: {}", image_name);
     Ok(())
 }
 
-/// Format Rust toolchain version for rustup
-fn format_rust_toolchain(rust_version: &str) -> String {
-    let version = rust_version
-        .trim_start_matches("rustc ")
-        .split_whitespace()
-        .next()
-        .unwrap_or(rust_version);
-
-    if version == "nightly" || version.starts_with("nightly-") {
-        format!("{}-x86_64-unknown-linux-gnu", version)
-    } else {
-        format!("{}-x86_64-unknown-linux-gnu", version)
-    }
-}
-
-/// Format SDK checkout command based on version format
-fn format_sdk_checkout(sdk_version: &str) -> String {
-    if sdk_version.len() == 40 {
-        // Full commit hash
-        format!("git checkout {}", sdk_version)
-    } else if sdk_version.starts_with('v') {
-        // Version tag with 'v' prefix
-        format!("git checkout tags/{}", sdk_version)
-    } else {
-        // Try multiple tag formats
-        format!(
-            "git checkout tags/v{} || git checkout tags/{} || git checkout {}",
-            sdk_version, sdk_version, sdk_version
-        )
-    }
-}
-
-/// Build fluent-builder verify command arguments
+/// Build fluentbase verify command arguments
 fn build_verify_command(
     contract_address: &str,
     chain_id: &str,
     rpc_endpoint: &str,
-    profile: &str,
     features: &[String],
     no_default_features: bool,
 ) -> Vec<String> {
     let mut cmd = vec![
-        "fluent-builder".to_string(),
+        "fluentbase".to_string(),
         "verify".to_string(),
         ".".to_string(), // Project directory (mounted at WORKDIR)
         "--address".to_string(),
         contract_address.to_string(),
-        "--chain-id".to_string(),
-        chain_id.to_string(),
         "--rpc".to_string(),
         rpc_endpoint.to_string(),
-        "--json".to_string(), // Always use JSON output for parsing
+        "--chain-id".to_string(),
+        chain_id.to_string(),
+        "--no-docker".to_string(), // IMPORTANT: Disable Docker since we're already in a container
     ];
-
-    // Add profile if not default
-    if !profile.is_empty() && profile != "release" {
-        cmd.push("--profile".to_string());
-        cmd.push(profile.to_string());
-    }
 
     // Add features if specified
     if !features.is_empty() {
         cmd.push("--features".to_string());
-        // Join features with spaces as expected by the CLI
-        cmd.push(features.join(" "));
+        cmd.push(features.join(","));
     }
 
     // Add no-default-features flag if set
@@ -308,6 +168,9 @@ fn build_verify_command(
         cmd.push("--no-default-features".to_string());
     }
 
+    // Log the command for debugging
+    info!("Verification command: {:?}", cmd);
+    
     cmd
 }
 
@@ -315,18 +178,16 @@ fn build_verify_command(
 async fn create_container(
     docker: &Docker,
     image_name: &str,
-    command: &Vec<std::string::String>,
+    command: &[String],
 ) -> Result<String, VerificationError> {
     let container_suffix = Uuid::new_v4();
-    let container_name = format!(
-        "fluent-verify-{}",
-        container_suffix
-    );
+    let container_name = format!("fluent-verify-{}", container_suffix);
     
     debug!("Creating container: {}", container_name);
 
     let options = CreateContainerOptions {
         name: container_name.clone(),
+        platform: Some("linux/amd64".to_string()),
         ..Default::default()
     };
 
@@ -380,6 +241,8 @@ async fn copy_directory_to_container(
 
 /// Run container and collect output
 async fn run_container(docker: &Docker, container_id: &str) -> Result<String, VerificationError> {
+    info!("Starting container: {}", container_id);
+    
     // Start container
     docker
         .start_container::<String>(container_id, None)
@@ -436,55 +299,71 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
         .join("");
 
     // Log stderr for debugging
-   if !stderr_output.is_empty() {
-    let stderr = stderr_output
-        .into_iter()
-        .filter_map(|bytes| String::from_utf8(bytes.to_vec()).ok())
-        .collect::<Vec<_>>()
-        .join("");
-    debug!("Container stderr: {}", stderr);
-}
+    if !stderr_output.is_empty() {
+        let stderr = stderr_output
+            .into_iter()
+            .filter_map(|bytes| String::from_utf8(bytes.to_vec()).ok())
+            .collect::<Vec<_>>()
+            .join("");
+        info!("Container stderr output: {}", stderr);
+    }
+
+    info!("Container stdout length: {} bytes", output.len());
+    if output.len() < 1000 {
+        debug!("Container stdout: {}", output);
+    } else {
+        debug!("Container stdout (first 1000 chars): {}", &output[..1000]);
+    }
 
     Ok(output)
 }
 
-/// Parse CLI JSON output
+/// Parse CLI JSON output from the verify command
 fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
-    // Find JSON in output (in case there's other text)
-    let json_start = output.find('{');
-    let json_end = output.rfind('}');
+    // Log the raw output for debugging
+    debug!("Raw container output: {}", output);
     
-    if let (Some(start), Some(end)) = (json_start, json_end) {
-        let json_str = &output[start..=end];
-        serde_json::from_str(json_str)
-            .map_err(|e| VerificationError::Json(e))
-    } else {
-        Err(VerificationError::Docker(format!(
-            "No JSON output found in: {}",
-            output
-        )))
+    // The CLI outputs JSON when verification completes
+    // Try to parse the entire output as JSON first
+    match serde_json::from_str::<CliOutput>(output) {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            debug!("Failed to parse output as JSON directly: {}", e);
+            
+            // If that fails, try to find JSON in the output
+            let json_start = output.find('{');
+            let json_end = output.rfind('}');
+            
+            if let (Some(start), Some(end)) = (json_start, json_end) {
+                let json_str = &output[start..=end];
+                debug!("Attempting to parse JSON substring: {}", json_str);
+                
+                serde_json::from_str(json_str)
+                    .map_err(|e| {
+                        warn!("Failed to parse JSON substring: {}", e);
+                        VerificationError::Json(e)
+                    })
+            } else {
+                // If no JSON found, the command might have failed
+                // Check if output contains error indicators
+                if output.contains("error") || output.contains("Error") {
+                    Err(VerificationError::Docker(format!(
+                        "Command failed with output: {}",
+                        output
+                    )))
+                } else if output.is_empty() {
+                    Err(VerificationError::Docker(
+                        "No output from verification command".to_string()
+                    ))
+                } else {
+                    Err(VerificationError::Docker(format!(
+                        "No JSON output found. Raw output: {}",
+                        output
+                    )))
+                }
+            }
+        }
     }
-}
-
-/// Build tar archive with Dockerfile
-fn build_tar_with_dockerfile(content: &str) -> Result<Vec<u8>, VerificationError> {
-    let mut header = tar::Header::new_gnu();
-    header
-        .set_path("Dockerfile")
-        .map_err(|e| VerificationError::Docker(format!("Failed to set path: {}", e)))?;
-    header.set_size(content.len() as u64);
-    header.set_mode(0o755);
-    header.set_cksum();
-    
-    let mut tar = tar::Builder::new(Vec::new());
-    tar.append(&header, content.as_bytes())
-        .map_err(|e| VerificationError::Docker(format!("Failed to append: {}", e)))?;
-
-    let uncompressed = tar
-        .into_inner()
-        .map_err(|e| VerificationError::Docker(format!("Failed to finalize tar: {}", e)))?;
-    
-    compress_archive(&uncompressed)
 }
 
 /// Build tar archive from directory
@@ -511,113 +390,52 @@ fn compress_archive(uncompressed: &[u8]) -> Result<Vec<u8>, VerificationError> {
         .map_err(|e| VerificationError::Docker(format!("Failed to finish compression: {}", e)))
 }
 
-/// Clean up old Docker images keeping only the most recent ones
-pub async fn cleanup_old_images(
-    docker: &Docker,
-    keep_recent: usize,
-) -> Result<(), VerificationError> {
-    use bollard::image::ListImagesOptions;
-    use std::collections::HashMap;
-    
-    let mut filters = HashMap::new();
-    filters.insert("reference", vec!["fluent-builder:*"]);
-    
-    let options = ListImagesOptions {
-        filters,
-        ..Default::default()
-    };
-
-    let images = docker
-        .list_images(Some(options))
-        .await
-        .map_err(|e| VerificationError::Docker(format!("Failed to list images: {}", e)))?;
-
-    if images.len() <= keep_recent {
-        return Ok(());
-    }
-
-   // Sort by creation date (newest first)
-    let mut image_list: Vec<_> = images
-        .into_iter()
-        .filter_map(|img| {
-            img.repo_tags
-                .first()
-                .map(|tag| (tag.clone(), img.created))
-        })
-        .collect();
-
-    image_list.sort_by(|a, b| b.1.cmp(&a.1));
-
-    // Remove oldest images
-    for (tag, _) in image_list.into_iter().skip(keep_recent) {
-        info!("Removing old Docker image: {}", tag);
-        
-        if let Err(e) = docker.remove_image(&tag, None, None).await {
-            warn!("Failed to remove image {}: {}", tag, e);
-        }
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_format_image_name() {
-        assert_eq!(
-            format_image_name("v0.1.0", "1.75.0"),
-            "fluent-builder:0-1-0-rust-1-75-0"
+    fn test_build_verify_command() {
+        let cmd = build_verify_command(
+            "0x1234567890123456789012345678901234567890",
+            "9999",
+            "https://mainnet.fluent.xyz",
+            &vec!["mainnet".to_string()],
+            false,
         );
-        
-        assert_eq!(
-            format_image_name("v0.2.0-beta", "nightly-2024-01-01"),
-            "fluent-builder:0-2-0-beta-rust-nightly-2024-01-01"
+
+        assert_eq!(cmd[0], "fluentbase");
+        assert_eq!(cmd[1], "verify");
+        assert_eq!(cmd[2], ".");
+        assert!(cmd.contains(&"--address".to_string()));
+        assert!(cmd.contains(&"--no-docker".to_string()));
+        assert!(cmd.contains(&"--features".to_string()));
+        assert!(cmd.contains(&"mainnet".to_string()));
+    }
+
+    #[test] 
+    fn test_build_verify_command_no_features() {
+        let cmd = build_verify_command(
+            "0x1234567890123456789012345678901234567890",
+            "9999", 
+            "https://mainnet.fluent.xyz",
+            &vec![],
+            false,
         );
-        
-        assert_eq!(
-            format_image_name("abc123def456", "rustc 1.80.0 (051478957 2024-07-21)"),
-            "fluent-builder:abc123def456-rust-1-80-0"
-        );
+
+        assert!(!cmd.contains(&"--features".to_string()));
     }
 
     #[test]
-    fn test_format_rust_toolchain() {
-        assert_eq!(
-            format_rust_toolchain("1.75.0"),
-            "1.75.0-x86_64-unknown-linux-gnu"
+    fn test_build_verify_command_no_default_features() {
+        let cmd = build_verify_command(
+            "0x1234567890123456789012345678901234567890",
+            "9999",
+            "https://mainnet.fluent.xyz",
+            &vec![],
+            true,
         );
-        
-        assert_eq!(
-            format_rust_toolchain("rustc 1.80.0 (051478957 2024-07-21)"),
-            "1.80.0-x86_64-unknown-linux-gnu"
-        );
-        
-        assert_eq!(
-            format_rust_toolchain("nightly-2024-01-01"),
-            "nightly-2024-01-01-x86_64-unknown-linux-gnu"
-        );
-    }
 
-    #[test]
-    fn test_format_sdk_checkout() {
-        // Full commit hash
-        assert_eq!(
-            format_sdk_checkout("abc123def456789012345678901234567890abcd"),
-            "git checkout abc123def456789012345678901234567890abcd"
-        );
-        
-        // Version with 'v' prefix
-        assert_eq!(
-            format_sdk_checkout("v0.1.0"),
-            "git checkout tags/v0.1.0"
-        );
-        
-        // Version without prefix
-        assert_eq!(
-            format_sdk_checkout("0.1.0"),
-            "git checkout tags/v0.1.0 || git checkout tags/0.1.0 || git checkout 0.1.0"
-        );
+        assert!(cmd.contains(&"--no-default-features".to_string()));
     }
 }

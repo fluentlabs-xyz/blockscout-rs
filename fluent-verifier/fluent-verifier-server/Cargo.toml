@@ -24,6 +24,7 @@ uuid = { workspace = true, features = ["v4"] }
 hex = {workspace = true}
 sha2 = { workspace = true }
 sha3 = { workspace = true }
+reqwest = {workspace = true}
 
 [dev-dependencies]
 blockscout-service-launcher = { workspace = true, features = [ "test-server" ] }
