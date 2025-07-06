@@ -89,6 +89,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/fluent-verifier:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/fluent-verifier:latest
           labels: |
             org.opencontainers.image.source=${{ github.event.repository.html_url }}
             org.opencontainers.image.revision=${{ github.sha }}
