@@ -9,6 +9,7 @@ use crate::{
 pub async fn verify_contract(
     docker: &bollard::Docker,
     request: VerifyWasmRequest,
+    container_network: &Option<String>,
 ) -> Result<VerifyWasmResponse, VerificationError> {
     // Step 1: Prepare source code
     tracing::info!("Preparing source code");
@@ -53,6 +54,7 @@ pub async fn verify_contract(
         &compile_settings.sdk_version,
         &compile_settings.features,
         compile_settings.no_default_features,
+        container_network,
     )
     .await?;
 

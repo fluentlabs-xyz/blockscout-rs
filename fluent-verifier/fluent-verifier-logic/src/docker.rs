@@ -48,6 +48,7 @@ pub async fn run_verification(
     sdk_version: &str,
     features: &[String],
     no_default_features: bool,
+    container_network: &Option<String>,
 ) -> Result<CliOutput, VerificationError> {
     info!(
         "Starting verification for contract {} on chain {} with SDK version {}",
@@ -70,7 +71,7 @@ pub async fn run_verification(
     );
 
     // Create container
-    let container_id = create_container(docker, &image_name, &command).await?;
+    let container_id = create_container(docker, &image_name, &command, container_network).await?;
 
     // Copy source directory to container
     copy_directory_to_container(docker, &container_id, source_dir).await?;
@@ -180,6 +181,7 @@ async fn create_container(
     docker: &Docker,
     image_name: &str,
     command: &[String],
+    container_network: &Option<String>,
 ) -> Result<String, VerificationError> {
     let container_suffix = Uuid::new_v4();
     let container_name = format!("fluent-verify-{container_suffix}");
@@ -192,12 +194,13 @@ async fn create_container(
     };
 
     let cmd_refs: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
+    let network_mode = container_network.as_deref().unwrap_or("bridge").to_string();
 
     let config = container::Config {
         image: Some(image_name),
         working_dir: Some(WORKDIR),
         host_config: Some(HostConfig {
-            network_mode: Some("host".to_string()),
+            network_mode: Some(network_mode),
             auto_remove: Some(true),
             memory: Some(MEMORY_LIMIT),
             ..Default::default()

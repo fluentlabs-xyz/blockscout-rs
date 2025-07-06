@@ -13,6 +13,7 @@ use tonic::{Request, Response, Status as TonicStatus};
 
 pub struct FluentWasmVerifierService {
     docker: Arc<Docker>,
+    settings: DockerApiSettings,
 }
 
 impl FluentWasmVerifierService {
@@ -23,6 +24,7 @@ impl FluentWasmVerifierService {
 
         Ok(Self {
             docker: Arc::new(docker),
+            settings: docker_api_settings,
         })
     }
 }
@@ -52,7 +54,7 @@ impl WasmVerifier for FluentWasmVerifierService {
 
         // Run verification
         let verification_result =
-            verify_contract(&self.docker, proto_request)
+            verify_contract(&self.docker, proto_request, &self.settings.network)
                 .await
                 .map_err(|e| {
                     tracing::error!(%request_id, error = %e, "Verification error");

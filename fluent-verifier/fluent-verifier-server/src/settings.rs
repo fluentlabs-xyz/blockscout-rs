@@ -42,12 +42,17 @@ pub struct DockerApiSettings {
     /// Address of the Docker API endpoint.
     /// Examples: "unix:///var/run/docker.sock" or "tcp://localhost:2375"
     pub addr: String,
+
+    /// Network to attach temporary verification containers to.
+    /// If not set, Docker's default 'bridge' network will be used.
+    pub network: Option<String>,
 }
 
 impl Default for DockerApiSettings {
     fn default() -> Self {
         Self {
             addr: "unix:///var/run/docker.sock".to_string(),
+            network: None,
         }
     }
 }
