@@ -29,6 +29,9 @@ walkdir = { workspace = true }
 tempfile = { workspace = true }
 tonic = { workspace = true }
 zip = { workspace = true }
+rwasm = { version = "0.3.2", default-features = false }
+reqwest = "0.12.24"
+hex = "0.4.3"
 
 [dev-dependencies]
 blockscout-service-launcher = { version = "0.9.0" }

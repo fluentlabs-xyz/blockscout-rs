@@ -1,103 +1,141 @@
-//! Docker orchestration for smart contract verification using pre-built images
-//!
-//! This module provides functionality to:
-//! - Pull versioned Docker images from ghcr.io
-//! - Run contract verification in isolated containers
-//! - Parse and return verification results
+//! Docker orchestration for smart contract compilation
 
 use crate::error::VerificationError;
 use bollard::{
     container::{
-        self, AttachContainerOptions, CreateContainerOptions, LogOutput, UploadToContainerOptions,
+        self, AttachContainerOptions, CreateContainerOptions, DownloadFromContainerOptions,
+        LogOutput, UploadToContainerOptions,
     },
     image::CreateImageOptions,
     models::HostConfig,
     Docker,
 };
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
-use std::{io::Write, path::Path, str};
-use tracing::{debug, info, trace, warn};
+use std::{io::Write, path::Path};
+use tracing::{debug, info, trace};
 use uuid::Uuid;
 
 // Constants
+pub const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
 const WORKDIR: &str = "/workspace";
-const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
 const MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
-                                                  // const DEFAULT_TIMEOUT: u64 = 120; // 2 minutes - Reserved for future use
 
-/// CLI output structure matching fluentbase's JSON format
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CliOutput {
-    pub verified: bool,
-    pub expected_hash: String,
-    pub actual_hash: String,
-    pub rustc_version: String,
-    pub sdk_version: String,
-    pub build_platform: String,
+pub const DEFAULT_RUST_FLAGS: &str = "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory";
+
+/// Cargo build configuration
+#[derive(Debug, Clone)]
+pub struct CargoBuildConfig {
+    pub profile: BuildProfile,
+    pub features: Vec<String>,
+    pub no_default_features: bool,
+    pub rustflags: String,
 }
 
-/// Main entry point for Docker-based verification
-#[allow(clippy::too_many_arguments)]
-pub async fn run_verification(
-    docker: &Docker,
-    source_dir: &Path,
-    contract_address: &str,
-    chain_id: &str,
-    rpc_endpoint: &str,
-    sdk_version: &str,
-    features: &[String],
-    no_default_features: bool,
-    container_network: &Option<String>,
-) -> Result<CliOutput, VerificationError> {
-    info!(
-        "Starting verification for contract {} on chain {} with SDK version {}",
-        contract_address, chain_id, sdk_version
-    );
+/// Build profile
+#[derive(Debug, Clone)]
+pub enum BuildProfile {
+    Release,
+    Debug,
+}
 
-    // Format image name with SDK version tag
-    let image_name = format!("{BASE_IMAGE_NAME}:{sdk_version}");
+impl BuildProfile {
+    pub fn as_str(&self) -> &str {
+        match self {
+            BuildProfile::Release => "release",
+            BuildProfile::Debug => "debug",
+        }
+    }
+}
+
+impl CargoBuildConfig {
+    pub fn to_command_args(&self) -> Vec<String> {
+        let mut args = vec![
+            "cargo".to_string(),
+            "build".to_string(),
+            "--target".to_string(),
+            "wasm32-unknown-unknown".to_string(),
+            "--locked".to_string(),
+        ];
+
+        match self.profile {
+            BuildProfile::Release => args.push("--release".to_string()),
+            BuildProfile::Debug => {}
+        }
+
+        if !self.features.is_empty() {
+            args.push("--features".to_string());
+            args.push(self.features.join(","));
+        }
+
+        if self.no_default_features {
+            args.push("--no-default-features".to_string());
+        }
+
+        args
+    }
+    pub fn env_vars(&self) -> Vec<String> {
+        let mut env = vec!["RUST_LOG=info".to_string()];
+        env.push(format!("RUSTFLAGS={}", self.rustflags));
+
+        env
+    }
+
+    pub fn target_path(&self) -> String {
+        format!(
+            "{}/target/wasm32-unknown-unknown/{}",
+            WORKDIR,
+            self.profile.as_str()
+        )
+    }
+}
+
+/// Build output
+#[derive(Debug)]
+pub struct BuildOutput {
+    pub wasm_bytes: Vec<u8>,
+}
+
+/// Main entry point for Docker-based compilation
+pub async fn run_build(
+    docker: &Docker,
+    docker_image: &str,
+    source_dir: &Path,
+    build_config: &CargoBuildConfig,
+    container_network: &Option<String>,
+) -> Result<BuildOutput, VerificationError> {
+    info!("Starting build with image: {}", docker_image);
 
     // Pull image if needed
-    pull_image_if_needed(docker, &image_name).await?;
-
-    // Build verification command
-    let command = build_verify_command(
-        contract_address,
-        chain_id,
-        rpc_endpoint,
-        features,
-        no_default_features,
-    );
+    pull_image_if_needed(docker, docker_image).await?;
 
     // Create container
-    let container_id = create_container(docker, &image_name, &command, container_network).await?;
+    let container_id = create_container(docker, docker_image, build_config, container_network).await?;
 
-    // Copy source directory to container
+    // Copy source
     copy_directory_to_container(docker, &container_id, source_dir).await?;
 
-    // Run container and get output
-    let output = run_container(docker, &container_id).await?;
+    // Run build
+    run_container(docker, &container_id).await?;
 
-    // Parse and return results
-    parse_cli_output(&output)
+    // Extract WASM
+    let target_path = build_config.target_path();
+    let wasm_bytes = copy_wasm_from_container(docker, &container_id, &target_path).await?;
+
+    info!("Build completed, WASM size: {} bytes", wasm_bytes.len());
+
+    Ok(BuildOutput { wasm_bytes })
 }
 
-/// Pull Docker image if it doesn't exist locally
 async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), VerificationError> {
-    // Check if image exists locally
     match docker.inspect_image(image_name).await {
         Ok(_) => {
             info!("Using existing Docker image: {}", image_name);
             return Ok(());
         }
         Err(bollard::errors::Error::DockerResponseServerError {
-            status_code: 404, ..
-        }) => {
-            info!(
-                "Image {} not found locally, pulling from registry",
-                image_name
-            );
+                status_code: 404, ..
+            }) => {
+            info!("Image {} not found locally, pulling from registry", image_name);
         }
         Err(e) => {
             return Err(VerificationError::Docker(format!(
@@ -106,7 +144,6 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
         }
     }
 
-    // Pull the image
     let options = CreateImageOptions {
         from_image: image_name,
         ..Default::default()
@@ -128,7 +165,7 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
             }
             Err(e) => {
                 return Err(VerificationError::Docker(format!(
-                    "Failed to pull image {image_name}: {e}. Make sure the SDK version exists in the registry."
+                    "Failed to pull image {image_name}: {e}"
                 )));
             }
         }
@@ -138,62 +175,30 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
     Ok(())
 }
 
-/// Build fluentbase verify command arguments
-fn build_verify_command(
-    contract_address: &str,
-    chain_id: &str,
-    rpc_endpoint: &str,
-    features: &[String],
-    no_default_features: bool,
-) -> Vec<String> {
-    let mut cmd = vec![
-        "fluentbase".to_string(),
-        "verify".to_string(),
-        ".".to_string(), // Project directory (mounted at WORKDIR)
-        "--address".to_string(),
-        contract_address.to_string(),
-        "--rpc".to_string(),
-        rpc_endpoint.to_string(),
-        "--chain-id".to_string(),
-        chain_id.to_string(),
-        "--no-docker".to_string(), // IMPORTANT: Disable Docker since we're already in a container
-    ];
-
-    // Add features if specified
-    if !features.is_empty() {
-        cmd.push("--features".to_string());
-        cmd.push(features.join(","));
-    }
-
-    // Add no-default-features flag if set
-    if no_default_features {
-        cmd.push("--no-default-features".to_string());
-    }
-
-    // Log the command for debugging
-    info!("Verification command: {:?}", cmd);
-
-    cmd
-}
-
-/// Create container
 async fn create_container(
     docker: &Docker,
     image_name: &str,
-    command: &[String],
+    build_config: &CargoBuildConfig,
     container_network: &Option<String>,
 ) -> Result<String, VerificationError> {
     let container_suffix = Uuid::new_v4();
-    let container_name = format!("fluent-verify-{container_suffix}");
+    let container_name = format!("fluent-build-{container_suffix}");
 
     debug!("Creating container: {}", container_name);
+    info!("Container will remain after completion for debugging");
+    info!("Connect with: docker exec -it {} /bin/bash", container_name);
 
     let options = CreateContainerOptions {
-        name: container_name.clone(),
+        name: container_name,
         platform: Some("linux/amd64".to_string()),
     };
 
+    let command = build_config.to_command_args();
     let cmd_refs: Vec<&str> = command.iter().map(|s| s.as_str()).collect();
+
+    let env_vars = build_config.env_vars();
+    let env_refs: Vec<&str> = env_vars.iter().map(|s| s.as_str()).collect();
+
     let network_mode = container_network.as_deref().unwrap_or("bridge").to_string();
 
     let config = container::Config {
@@ -206,7 +211,7 @@ async fn create_container(
             ..Default::default()
         }),
         cmd: Some(cmd_refs),
-        env: Some(vec!["RUST_LOG=info"]),
+        env: Some(env_refs),
         ..Default::default()
     };
 
@@ -218,7 +223,6 @@ async fn create_container(
     Ok(container.id)
 }
 
-/// Copy source directory to container
 async fn copy_directory_to_container(
     docker: &Docker,
     container_id: &str,
@@ -242,17 +246,14 @@ async fn copy_directory_to_container(
     Ok(())
 }
 
-/// Run container and collect output
-async fn run_container(docker: &Docker, container_id: &str) -> Result<String, VerificationError> {
+async fn run_container(docker: &Docker, container_id: &str) -> Result<(), VerificationError> {
     info!("Starting container: {}", container_id);
 
-    // Start container
     docker
         .start_container::<String>(container_id, None)
         .await
         .map_err(|e| VerificationError::Docker(format!("Failed to start container: {e}")))?;
 
-    // Attach to container to get output
     let mut attach_results = docker
         .attach_container::<String>(
             container_id,
@@ -267,103 +268,93 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<String, Ve
         .await
         .map_err(|e| VerificationError::Docker(format!("Failed to attach to container: {e}")))?;
 
-    let mut stdout_output = vec![];
     let mut stderr_output = vec![];
 
     while let Some(result) = attach_results.output.next().await {
         match result {
-            Ok(output) => match output {
-                LogOutput::StdOut { message } => stdout_output.push(message),
-                LogOutput::StdErr { message } => stderr_output.push(message),
-                _ => (),
-            },
+            Ok(LogOutput::StdErr { message }) => stderr_output.push(message),
             Err(err) => {
                 return Err(VerificationError::Docker(format!(
                     "Error reading container output: {err}"
                 )));
             }
+            _ => {}
         }
     }
 
-    // Convert output to string
-    let output = stdout_output
-        .into_iter()
-        .filter_map(|bytes| match str::from_utf8(&bytes) {
-            Ok(s) => Some(s.to_string()),
-            Err(err) => {
-                warn!("Failed to convert output to UTF-8: {}", err);
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
-    // Log stderr for debugging
     if !stderr_output.is_empty() {
         let stderr = stderr_output
             .into_iter()
             .filter_map(|bytes| String::from_utf8(bytes.to_vec()).ok())
             .collect::<Vec<_>>()
             .join("");
-        info!("Container stderr output: {}", stderr);
-    }
 
-    info!("Container stdout length: {} bytes", output.len());
-    if output.len() < 1000 {
-        debug!("Container stdout: {}", output);
-    } else {
-        debug!("Container stdout (first 1000 chars): {}", &output[..1000]);
-    }
+        debug!("Container stderr: {}", stderr);
 
-    Ok(output)
-}
-
-/// Parse CLI JSON output from the verify command
-fn parse_cli_output(output: &str) -> Result<CliOutput, VerificationError> {
-    // Log the raw output for debugging
-    debug!("Raw container output: {}", output);
-
-    // The CLI outputs JSON when verification completes
-    // Try to parse the entire output as JSON first
-    match serde_json::from_str::<CliOutput>(output) {
-        Ok(result) => Ok(result),
-        Err(e) => {
-            debug!("Failed to parse output as JSON directly: {}", e);
-
-            // If that fails, try to find JSON in the output
-            let json_start = output.find('{');
-            let json_end = output.rfind('}');
-
-            if let (Some(start), Some(end)) = (json_start, json_end) {
-                let json_str = &output[start..=end];
-                debug!("Attempting to parse JSON substring: {}", json_str);
-
-                serde_json::from_str(json_str).map_err(|e| {
-                    warn!("Failed to parse JSON substring: {}", e);
-                    VerificationError::Json(e)
-                })
-            } else {
-                // If no JSON found, the command might have failed
-                // Check if output contains error indicators
-                if output.contains("error") || output.contains("Error") {
-                    Err(VerificationError::Docker(format!(
-                        "Command failed with output: {output}"
-                    )))
-                } else if output.is_empty() {
-                    Err(VerificationError::Docker(
-                        "No output from verification command".to_string(),
-                    ))
-                } else {
-                    Err(VerificationError::Docker(format!(
-                        "No JSON output found. Raw output: {output}"
-                    )))
-                }
-            }
+        if stderr.contains("error:") || stderr.contains("Error") {
+            return Err(VerificationError::Docker(format!("Build failed: {stderr}")));
         }
     }
+
+    Ok(())
+}
+async fn copy_wasm_from_container(
+    docker: &Docker,
+    container_id: &str,
+    target_path: &str,
+) -> Result<Vec<u8>, VerificationError> {
+    info!("Copying WASM from container at {}", target_path);
+
+    let options = DownloadFromContainerOptions {
+        path: target_path.to_string(),
+    };
+
+    let mut stream = docker.download_from_container(container_id, Some(options));
+    let mut tar_data = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            VerificationError::Docker(format!("Failed to download from container: {e}"))
+        })?;
+        tar_data.extend_from_slice(&chunk);
+    }
+
+    let mut archive = tar::Archive::new(std::io::Cursor::new(tar_data));
+
+    for entry in archive.entries().map_err(|e| {
+        VerificationError::Docker(format!("Failed to read tar entries: {e}"))
+    })? {
+        let mut entry = entry.map_err(|e| {
+            VerificationError::Docker(format!("Failed to read tar entry: {e}"))
+        })?;
+
+        let is_wasm = {
+            let path = entry.path().map_err(|e| {
+                VerificationError::Docker(format!("Failed to get entry path: {e}"))
+            })?;
+
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|filename| filename.ends_with(".wasm") && !filename.contains(".metadata"))
+                .unwrap_or(false)
+        };
+
+        if is_wasm {
+            let mut wasm_bytes = Vec::new();
+            std::io::Read::read_to_end(&mut entry, &mut wasm_bytes).map_err(|e| {
+                VerificationError::Docker(format!("Failed to read WASM file: {e}"))
+            })?;
+
+            info!("Found WASM file ({} bytes)", wasm_bytes.len());
+            return Ok(wasm_bytes);
+        }
+    }
+
+    Err(VerificationError::Docker(
+        "No WASM file found in build output".to_string(),
+    ))
 }
 
-/// Build tar archive from directory
 fn build_tar_from_directory(dir: &Path) -> Result<Vec<u8>, VerificationError> {
     let mut tar = tar::Builder::new(Vec::new());
     tar.append_dir_all("", dir)
@@ -376,7 +367,6 @@ fn build_tar_from_directory(dir: &Path) -> Result<Vec<u8>, VerificationError> {
     compress_archive(&uncompressed)
 }
 
-/// Compress archive data
 fn compress_archive(uncompressed: &[u8]) -> Result<Vec<u8>, VerificationError> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
@@ -392,47 +382,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_verify_command() {
-        let cmd = build_verify_command(
-            "0x1234567890123456789012345678901234567890",
-            "9999",
-            "https://mainnet.fluent.xyz",
-            &["mainnet".to_string()],
-            false,
-        );
+    fn test_cargo_build_config() {
+        let config = CargoBuildConfig {
+            profile: BuildProfile::Release,
+            features: vec!["mainnet".to_string()],
+            no_default_features: false,
+        };
 
-        assert_eq!(cmd[0], "fluentbase");
-        assert_eq!(cmd[1], "verify");
-        assert_eq!(cmd[2], ".");
-        assert!(cmd.contains(&"--address".to_string()));
-        assert!(cmd.contains(&"--no-docker".to_string()));
+        let cmd = config.to_command_args();
+
+        assert!(cmd.contains(&"cargo".to_string()));
+        assert!(cmd.contains(&"--release".to_string()));
         assert!(cmd.contains(&"--features".to_string()));
         assert!(cmd.contains(&"mainnet".to_string()));
-    }
-
-    #[test]
-    fn test_build_verify_command_no_features() {
-        let cmd = build_verify_command(
-            "0x1234567890123456789012345678901234567890",
-            "9999",
-            "https://mainnet.fluent.xyz",
-            &[],
-            false,
-        );
-
-        assert!(!cmd.contains(&"--features".to_string()));
-    }
-
-    #[test]
-    fn test_build_verify_command_no_default_features() {
-        let cmd = build_verify_command(
-            "0x1234567890123456789012345678901234567890",
-            "9999",
-            "https://mainnet.fluent.xyz",
-            &[],
-            true,
-        );
-
-        assert!(cmd.contains(&"--no-default-features".to_string()));
     }
 }

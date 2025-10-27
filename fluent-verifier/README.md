@@ -35,3 +35,13 @@ just run
 To fix this error you need to change tonic version of `tonic` in `blockscout-service-launcer` to `0.8`
 
 For now you can only change in `Cargo.lock`
+
+## Test with curl
+
+<!-- blockscout -->
+```sh
+curl -X POST http://localhost:8050/api/v1/fluent/verify-wasm \
+  -H "Content-Type: application/json" \
+  -d @test-request-archive.json \
+  -v
+```

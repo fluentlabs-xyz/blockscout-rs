@@ -72,6 +72,11 @@ message CompileSettings {
   
   // Disable default features
   bool no_default_features = 3;
+
+  // // Rust compiler flags (RUSTFLAGS)
+  // // Example: "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory"
+  // string rustflags = 4;
+
 }
 
 // Response message for verification
