@@ -124,6 +124,17 @@ pub async fn run_build(
     let target_path = build_config.target_path();
     let wasm_bytes = copy_wasm_from_container(docker, &container_id, &target_path).await?;
 
+    docker
+        .remove_container(
+            &container_id,
+            Some(bollard::container::RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            }),
+        )
+        .await
+        .map_err(|e| VerificationError::Docker(format!("Failed to remove container: {e}")))?;
+
     info!("Build completed, WASM size: {} bytes", wasm_bytes.len());
 
     Ok(BuildOutput { wasm_bytes })
@@ -212,7 +223,7 @@ async fn create_container(
         working_dir: Some(WORKDIR),
         host_config: Some(HostConfig {
             network_mode: Some(network_mode),
-            auto_remove: Some(true),
+            auto_remove: Some(false),
             memory: Some(MEMORY_LIMIT),
             ..Default::default()
         }),
