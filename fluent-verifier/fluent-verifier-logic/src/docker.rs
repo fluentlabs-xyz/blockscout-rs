@@ -20,7 +20,8 @@ pub const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
 const WORKDIR: &str = "/workspace";
 const MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
 
-pub const DEFAULT_RUST_FLAGS: &str = "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory";
+pub const DEFAULT_RUST_FLAGS: &str =
+    "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory";
 
 /// Cargo build configuration
 #[derive(Debug, Clone)]
@@ -32,6 +33,7 @@ pub struct CargoBuildConfig {
 }
 
 /// Build profile
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum BuildProfile {
     Release,
@@ -109,7 +111,8 @@ pub async fn run_build(
     pull_image_if_needed(docker, docker_image).await?;
 
     // Create container
-    let container_id = create_container(docker, docker_image, build_config, container_network).await?;
+    let container_id =
+        create_container(docker, docker_image, build_config, container_network).await?;
 
     // Copy source
     copy_directory_to_container(docker, &container_id, source_dir).await?;
@@ -133,9 +136,12 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
             return Ok(());
         }
         Err(bollard::errors::Error::DockerResponseServerError {
-                status_code: 404, ..
-            }) => {
-            info!("Image {} not found locally, pulling from registry", image_name);
+            status_code: 404, ..
+        }) => {
+            info!(
+                "Image {} not found locally, pulling from registry",
+                image_name
+            );
         }
         Err(e) => {
             return Err(VerificationError::Docker(format!(
@@ -321,17 +327,17 @@ async fn copy_wasm_from_container(
 
     let mut archive = tar::Archive::new(std::io::Cursor::new(tar_data));
 
-    for entry in archive.entries().map_err(|e| {
-        VerificationError::Docker(format!("Failed to read tar entries: {e}"))
-    })? {
-        let mut entry = entry.map_err(|e| {
-            VerificationError::Docker(format!("Failed to read tar entry: {e}"))
-        })?;
+    for entry in archive
+        .entries()
+        .map_err(|e| VerificationError::Docker(format!("Failed to read tar entries: {e}")))?
+    {
+        let mut entry = entry
+            .map_err(|e| VerificationError::Docker(format!("Failed to read tar entry: {e}")))?;
 
         let is_wasm = {
-            let path = entry.path().map_err(|e| {
-                VerificationError::Docker(format!("Failed to get entry path: {e}"))
-            })?;
+            let path = entry
+                .path()
+                .map_err(|e| VerificationError::Docker(format!("Failed to get entry path: {e}")))?;
 
             path.file_name()
                 .and_then(|n| n.to_str())
@@ -341,9 +347,8 @@ async fn copy_wasm_from_container(
 
         if is_wasm {
             let mut wasm_bytes = Vec::new();
-            std::io::Read::read_to_end(&mut entry, &mut wasm_bytes).map_err(|e| {
-                VerificationError::Docker(format!("Failed to read WASM file: {e}"))
-            })?;
+            std::io::Read::read_to_end(&mut entry, &mut wasm_bytes)
+                .map_err(|e| VerificationError::Docker(format!("Failed to read WASM file: {e}")))?;
 
             info!("Found WASM file ({} bytes)", wasm_bytes.len());
             return Ok(wasm_bytes);
@@ -387,6 +392,7 @@ mod tests {
             profile: BuildProfile::Release,
             features: vec!["mainnet".to_string()],
             no_default_features: false,
+            rustflags: DEFAULT_RUST_FLAGS.to_string(),
         };
 
         let cmd = config.to_command_args();

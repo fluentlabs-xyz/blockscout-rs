@@ -1,10 +1,15 @@
-use crate::docker::{run_build, BuildProfile, CargoBuildConfig, BASE_IMAGE_NAME, DEFAULT_RUST_FLAGS};
-use crate::source::{prepare_source_from_archive, prepare_source_from_git};
-use crate::{error::VerificationError, proto::{VerifyWasmRequest, VerifyWasmResponse}, source};
-use fluent_verifier_proto::blockscout::fluent_verifier::v1::verify_wasm_request::Source;
-use fluent_verifier_proto::blockscout::fluent_verifier::v1::{VerificationResult, VerificationStatus};
+use crate::{
+    docker::{run_build, BuildProfile, CargoBuildConfig, BASE_IMAGE_NAME, DEFAULT_RUST_FLAGS},
+    error::VerificationError,
+    proto::{VerifyWasmRequest, VerifyWasmResponse},
+    source,
+    source::{prepare_source_from_archive, prepare_source_from_git},
+};
+use fluent_verifier_proto::blockscout::fluent_verifier::v1::{
+    verify_wasm_request::Source, VerificationResult, VerificationStatus,
+};
 use rwasm::RwasmModule;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -14,12 +19,14 @@ pub async fn verify_contract(
     request: VerifyWasmRequest,
     container_network: &Option<String>,
 ) -> Result<VerifyWasmResponse, VerificationError> {
-    tracing::info!("new verification request received: {:?}", DebugRequest(&request));
+    tracing::info!(
+        "new verification request received: {:?}",
+        DebugRequest(&request)
+    );
 
-    let compile_settings = request
-        .compile_settings
-        .as_ref()
-        .ok_or_else(|| VerificationError::InvalidRequest("compile_settings is required".to_string()))?;
+    let compile_settings = request.compile_settings.as_ref().ok_or_else(|| {
+        VerificationError::InvalidRequest("compile_settings is required".to_string())
+    })?;
 
     if compile_settings.sdk_version.is_empty() {
         return Err(VerificationError::InvalidRequest(
@@ -27,21 +34,20 @@ pub async fn verify_contract(
         ));
     }
 
-    let deployed_bytecode = fetch_deployed_bytecode(&request.contract_address, &request.rpc_endpoint).await?;
+    let deployed_bytecode =
+        fetch_deployed_bytecode(&request.contract_address, &request.rpc_endpoint).await?;
 
     let (rwasm, _read_len) = RwasmModule::new(&deployed_bytecode);
     let deployed_hash = calculate_hash(&rwasm.hint_section);
     tracing::info!("deployed_bytecode wasm section hash: {:?}", &deployed_hash);
 
     let source_dir = match &request.source {
-        Some(Source::ArchiveSource(archive)) => {
-            prepare_source_from_archive(archive).await?
-        }
-        Some(Source::GitSource(git)) => {
-            prepare_source_from_git(git).await?
-        }
+        Some(Source::ArchiveSource(archive)) => prepare_source_from_archive(archive).await?,
+        Some(Source::GitSource(git)) => prepare_source_from_git(git).await?,
         None => {
-            return Err(VerificationError::InvalidRequest("source is required".to_string()));
+            return Err(VerificationError::InvalidRequest(
+                "source is required".to_string(),
+            ));
         }
     };
 
@@ -59,7 +65,8 @@ pub async fn verify_contract(
         source_dir.path(),
         &build_config,
         container_network,
-    ).await?;
+    )
+    .await?;
 
     let built_hash = calculate_hash(&build_output.wasm_bytes);
     tracing::info!("built wasm hash: {}", built_hash);
@@ -124,22 +131,27 @@ async fn fetch_deployed_bytecode(address: &str, rpc: &str) -> Result<Vec<u8>, Ve
         .map_err(|e| VerificationError::VerificationFailed(format!("RPC request failed: {}", e)))?
         .json()
         .await
-        .map_err(|e| VerificationError::VerificationFailed(format!("Failed to parse RPC response: {}", e)))?;
+        .map_err(|e| {
+            VerificationError::VerificationFailed(format!("Failed to parse RPC response: {}", e))
+        })?;
 
     if let Some(error) = response.error {
-        return Err(VerificationError::VerificationFailed(format!("RPC error: {:?}", error)));
+        return Err(VerificationError::VerificationFailed(format!(
+            "RPC error: {:?}",
+            error
+        )));
     }
 
-    let bytecode_hex = response
-        .result
-        .ok_or_else(|| VerificationError::VerificationFailed("No result in RPC response".to_string()))?;
+    let bytecode_hex = response.result.ok_or_else(|| {
+        VerificationError::VerificationFailed("No result in RPC response".to_string())
+    })?;
 
-    let bytecode = hex::decode(bytecode_hex.trim_start_matches("0x"))
-        .map_err(|e| VerificationError::VerificationFailed(format!("Failed to decode bytecode: {}", e)))?;
+    let bytecode = hex::decode(bytecode_hex.trim_start_matches("0x")).map_err(|e| {
+        VerificationError::VerificationFailed(format!("Failed to decode bytecode: {}", e))
+    })?;
 
     Ok(bytecode)
 }
-
 
 pub struct DebugRequest<'a>(pub &'a VerifyWasmRequest);
 
@@ -191,7 +203,6 @@ impl fmt::Debug for DebugSource<'_> {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
