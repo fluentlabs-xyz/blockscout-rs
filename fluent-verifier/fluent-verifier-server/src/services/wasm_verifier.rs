@@ -272,7 +272,6 @@ mod tests {
             source: Some(crate::proto::verify_wasm_request::Source::ArchiveSource(
                 crate::proto::ArchiveSource {
                     content: Bytes::new(),
-                    project_path: ".".to_string(),
                 },
             )),
             contract_address: "0x1234567890123456789012345678901234567890".to_string(),
@@ -282,6 +281,9 @@ mod tests {
                 sdk_version: "v0.2.1-dev".to_string(),
                 features: vec![],
                 no_default_features: false,
+                rust_flags: vec![],
+                rust_toolchain: "".to_string(),
+                manifest_path: "".to_string(),
             }),
         };
 
@@ -298,6 +300,9 @@ mod tests {
             sdk_version: String::new(),
             features: vec![],
             no_default_features: false,
+            rust_flags: vec![],
+            rust_toolchain: "".to_string(),
+            manifest_path: "".to_string(),
         });
         assert!(validate_verification_request(&invalid_request).is_err());
     }

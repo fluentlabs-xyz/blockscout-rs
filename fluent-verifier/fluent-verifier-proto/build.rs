@@ -17,10 +17,10 @@ fn compile(
         .protoc_arg("grpc_api_configuration=proto/v1/api_config_http.yaml,output_format=yaml,allow_merge=true,merge_file_name=fluent-verifier,json_names_for_fields=false")
         .bytes(["."])
         .btree_map(["."])
-        .type_attribute(".", "#[actix_prost_macros::serde(rename_all=\"snake_case\")]") 
+        .type_attribute(".", "#[actix_prost_macros::serde(rename_all=\"snake_case\")]")
         .field_attribute(
             ".blockscout.fluentVerifier.v1.HealthCheckRequest.service",
-            "#[serde(default)]"
+            "#[serde(default)]",
         );
     config.compile_protos(protos, includes)?;
     Ok(())

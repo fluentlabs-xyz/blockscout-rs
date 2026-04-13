@@ -50,8 +50,14 @@ pub struct DockerApiSettings {
 
 impl Default for DockerApiSettings {
     fn default() -> Self {
+        let addr = if cfg!(target_os = "macos") {
+            let home = std::env::var("HOME").expect("HOME not set");
+            format!("unix://{}/.docker/run/docker.sock", home)
+        } else {
+            "unix:///var/run/docker.sock".to_string()
+        };
         Self {
-            addr: "unix:///var/run/docker.sock".to_string(),
+            addr,
             network: None,
         }
     }

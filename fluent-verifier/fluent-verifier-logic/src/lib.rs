@@ -11,8 +11,15 @@
 
 mod docker;
 mod error;
+mod metadata;
 mod source;
 mod verify;
+
+// Constants
+pub const DOCKER_BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
+pub const DOCKER_WORKDIR: &str = "/workspace";
+pub const DOCKER_MAX_MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
+pub const DEFAULT_RUST_TOOLCHAIN: &str = "1.92.0";
 
 // Import proto types
 use fluent_verifier_proto::blockscout::fluent_verifier::v1 as proto;

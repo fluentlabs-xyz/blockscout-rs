@@ -3,104 +3,74 @@ use crate::{
     proto::{ArchiveSource, GitSource},
 };
 use flate2::read::GzDecoder;
-use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use tar::Archive;
 use tempfile::TempDir;
+use tracing::info;
 use zip::ZipArchive;
 
 /// Prepares source code from archive
 pub async fn prepare_source_from_archive(
+    temp_dir: &TempDir,
     archive: &ArchiveSource,
-) -> Result<TempDir, VerificationError> {
+) -> Result<PathBuf, VerificationError> {
     let content = &archive.content;
     let format = detect_archive_format(content)?;
 
-    let temp_dir = extract_archive(content, format).await?;
+    extract_archive(temp_dir, content, format).await?;
 
-    // If project_path is specified, verify it exists
-    if !archive.project_path.is_empty() {
-        let project_dir = temp_dir.path().join(&archive.project_path);
-        if !project_dir.exists() {
-            return Err(VerificationError::Source(format!(
-                "Project path '{}' not found in archive",
-                archive.project_path
-            )));
-        }
-    }
-
-    Ok(temp_dir)
+    Ok(temp_dir.path().to_path_buf())
 }
 
 /// Prepares source code from git repository
-pub async fn prepare_source_from_git(git: &GitSource) -> Result<TempDir, VerificationError> {
-    use git2::Repository;
+pub async fn prepare_source_from_git(
+    temp_dir: &TempDir,
+    git: &GitSource,
+) -> Result<PathBuf, VerificationError> {
     use url::Url;
 
     // Validate URL
     let url = Url::parse(&git.repository_url)
         .map_err(|e| VerificationError::InvalidRequest(format!("Invalid git URL: {e}")))?;
-
     if !matches!(url.scheme(), "https" | "http") {
         return Err(VerificationError::InvalidRequest(
             "Only HTTPS/HTTP git URLs are supported".to_string(),
         ));
     }
 
-    // Clone repository
-    let temp_dir = tempfile::tempdir()?;
-
     // Try simple clone first (works for public repos)
-    let repo = match Repository::clone(&git.repository_url, temp_dir.path()) {
-        Ok(repo) => repo,
-        Err(err) if err.code() == git2::ErrorCode::Auth => {
-            return Err(VerificationError::Source(
-                "Repository requires authentication. Please use public repository or archive source".to_string()
-            ));
-        }
-        Err(err) => {
-            return Err(VerificationError::Source(format!(
-                "Failed to clone repository: {err}"
-            )));
-        }
-    };
+    let mut prep = gix::prepare_clone(git.repository_url.as_str(), temp_dir.path())?
+        .with_ref_name(if !git.commit_ref.is_empty() {
+            Some(git.commit_ref.as_str())
+        } else {
+            None
+        })
+        .unwrap();
 
-    // Checkout specified commit/branch/tag
-    let commit_ref = if git.commit_ref.is_empty() {
-        "main"
-    } else {
-        &git.commit_ref
-    };
+    let should_interrupt = AtomicBool::new(false);
 
-    let obj = repo.revparse_single(commit_ref).map_err(|_| {
-        VerificationError::Source(format!("Commit/branch '{commit_ref}' not found"))
-    })?;
+    let (mut checkout, _) = prep.fetch_then_checkout(gix::progress::Discard, &should_interrupt)?;
+    let (repo, _) = checkout.main_worktree(gix::progress::Discard, &should_interrupt)?;
 
-    repo.checkout_tree(&obj, None)?;
-    repo.set_head_detached(obj.id())?;
+    info!(
+        "Checkout repo into: {} hash={:?}",
+        repo.workdir().unwrap().display(),
+        repo.head()?.try_peel_to_id()?
+    );
 
-    // Verify project_path if specified
-    if !git.project_path.is_empty() {
-        let project_dir = temp_dir.path().join(&git.project_path);
-        if !project_dir.exists() {
-            return Err(VerificationError::Source(format!(
-                "Project path '{}' not found in repository",
-                git.project_path
-            )));
-        }
-    }
-
-    Ok(temp_dir)
+    Ok(temp_dir.path().to_path_buf())
 }
 
 /// Collects all source files from directory
 pub async fn collect_source_files(
-    dir: &Path,
+    dir: PathBuf,
 ) -> Result<std::collections::BTreeMap<String, String>, VerificationError> {
     use walkdir::WalkDir;
 
     let mut files = std::collections::BTreeMap::new();
 
-    for entry in WalkDir::new(dir)
+    for entry in WalkDir::new(&dir)
         .follow_links(true)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -127,7 +97,7 @@ pub async fn collect_source_files(
 
         if include {
             let relative = path
-                .strip_prefix(dir)
+                .strip_prefix(&dir)
                 .unwrap()
                 .to_string_lossy()
                 .into_owned();
@@ -161,19 +131,16 @@ fn detect_archive_format(content: &[u8]) -> Result<ArchiveFormat, VerificationEr
 }
 
 async fn extract_archive(
+    temp_dir: &TempDir,
     content: &[u8],
     format: ArchiveFormat,
-) -> Result<TempDir, VerificationError> {
-    let temp_dir = tempfile::tempdir()?;
-
+) -> Result<(), VerificationError> {
     match format {
         ArchiveFormat::TarGz => extract_tar_gz(content, &temp_dir).await?,
         ArchiveFormat::Zip => extract_zip(content, &temp_dir).await?,
     }
-
     normalize_archive_structure(&temp_dir).await?;
-
-    Ok(temp_dir)
+    Ok(())
 }
 
 async fn extract_tar_gz(content: &[u8], temp_dir: &TempDir) -> Result<(), VerificationError> {
@@ -345,7 +312,8 @@ mod tests {
     #[tokio::test]
     async fn test_extract_tar_gz() {
         let content = create_test_tar_gz();
-        let temp_dir = extract_archive(&content, ArchiveFormat::TarGz)
+        let temp_dir = tempfile::tempdir().unwrap();
+        extract_archive(&temp_dir, &content, ArchiveFormat::TarGz)
             .await
             .unwrap();
 
@@ -359,7 +327,10 @@ mod tests {
     #[tokio::test]
     async fn test_extract_zip() {
         let content = create_test_zip();
-        let temp_dir = extract_archive(&content, ArchiveFormat::Zip).await.unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        extract_archive(&temp_dir, &content, ArchiveFormat::Zip)
+            .await
+            .unwrap();
 
         assert!(temp_dir.path().join("Cargo.toml").exists());
         assert!(temp_dir.path().join("src/lib.rs").exists());

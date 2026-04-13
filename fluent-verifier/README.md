@@ -39,6 +39,7 @@ For now you can only change in `Cargo.lock`
 ## Test with curl
 
 <!-- blockscout -->
+
 ```sh
 curl -X POST http://localhost:8050/api/v1/fluent/verify-wasm \
   -H "Content-Type: application/json" \

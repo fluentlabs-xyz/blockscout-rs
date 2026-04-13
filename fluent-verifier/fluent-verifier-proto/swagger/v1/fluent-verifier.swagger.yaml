@@ -110,11 +110,6 @@ definitions:
         type: string
         format: byte
         title: Archive content as bytes
-      project_path:
-        type: string
-        title: |-
-          Path to project directory within archive (e.g., "." or "contracts/my-contract")
-          If empty, assumes project is at archive root
     title: Archive source (tar.gz or zip)
   v1CompileSettings:
     type: object
@@ -135,6 +130,19 @@ definitions:
       no_default_features:
         type: boolean
         title: Disable default features
+      rust_flags:
+        type: array
+        items:
+          type: string
+        title: |-
+          Rust compiler flags (RUSTFLAGS)
+          Example: ["-Clink-arg=-zstack-size=131072", "-Cpanic=abort", "-Ctarget-feature=+bulk-memory"]
+      rust_toolchain:
+        type: string
+        title: A version of rust toolchain (if empty then the same as in sdk version)
+      manifest_path:
+        type: string
+        title: / A path to Cargo.toml manifest (default is ./Cargo.toml)
     title: Simplified compilation settings
   v1GitSource:
     type: object
@@ -149,11 +157,6 @@ definitions:
         title: |-
           Commit hash, tag, or branch to checkout
           e.g., "main", "v1.0.0", "abc123def456"
-      project_path:
-        type: string
-        title: |-
-          Path to project directory within repository
-          If empty, assumes project is at repository root
     title: Git repository source
   v1HealthCheckResponse:
     type: object

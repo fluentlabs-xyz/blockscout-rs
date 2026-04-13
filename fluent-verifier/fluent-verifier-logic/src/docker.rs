@@ -1,6 +1,8 @@
 //! Docker orchestration for smart contract compilation
 
 use crate::error::VerificationError;
+use crate::metadata::cdylib_target_name;
+use crate::{DOCKER_MAX_MEMORY_LIMIT, DOCKER_WORKDIR};
 use bollard::{
     container::{
         self, AttachContainerOptions, CreateContainerOptions, DownloadFromContainerOptions,
@@ -11,17 +13,10 @@ use bollard::{
     Docker,
 };
 use futures_util::StreamExt;
-use std::{io::Write, path::Path};
+use std::io::Write;
+use std::path::PathBuf;
 use tracing::{debug, info, trace};
 use uuid::Uuid;
-
-// Constants
-pub const BASE_IMAGE_NAME: &str = "ghcr.io/fluentlabs-xyz/fluentbase-build";
-const WORKDIR: &str = "/workspace";
-const MEMORY_LIMIT: i64 = 4 * 1024 * 1024 * 1024; // 4GB
-
-pub const DEFAULT_RUST_FLAGS: &str =
-    "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory";
 
 /// Cargo build configuration
 #[derive(Debug, Clone)]
@@ -29,7 +24,10 @@ pub struct CargoBuildConfig {
     pub profile: BuildProfile,
     pub features: Vec<String>,
     pub no_default_features: bool,
-    pub rustflags: String,
+    pub rust_flags: Vec<String>,
+    pub manifest_path: PathBuf,
+    pub target_dir: PathBuf,
+    pub rust_toolchain: String,
 }
 
 /// Build profile
@@ -64,30 +62,37 @@ impl CargoBuildConfig {
             BuildProfile::Debug => {}
         }
 
+        if self.no_default_features {
+            args.push("--no-default-features".to_string());
+        }
+
         if !self.features.is_empty() {
             args.push("--features".to_string());
             args.push(self.features.join(","));
         }
 
-        if self.no_default_features {
-            args.push("--no-default-features".to_string());
-        }
+        let manifest_path = self.manifest_path.to_str().unwrap_or_default().to_string();
+        args.push("--manifest-path".to_string());
+        args.push(manifest_path.clone());
 
         args
     }
+
     pub fn env_vars(&self) -> Vec<String> {
         let mut env = vec!["RUST_LOG=info".to_string()];
-        env.push(format!("RUSTFLAGS={}", self.rustflags));
-
+        env.push(format!("RUSTFLAGS={}", self.rust_flags.join(" ")));
+        env.push(format!("CARGO_TARGET_DIR={}", self.target_dir.display()));
+        env.push(format!("RUSTUP_TOOLCHAIN={}", self.rust_toolchain));
         env
     }
 
-    pub fn target_path(&self) -> String {
-        format!(
-            "{}/target/wasm32-unknown-unknown/{}",
-            WORKDIR,
-            self.profile.as_str()
-        )
+    pub fn wasm_output_path(&self, file_name: String) -> anyhow::Result<String> {
+        Ok(format!(
+            "{}/wasm32-unknown-unknown/{}/{}.wasm",
+            self.target_dir.display(),
+            self.profile.as_str(),
+            file_name.as_str()
+        ))
     }
 }
 
@@ -101,11 +106,13 @@ pub struct BuildOutput {
 pub async fn run_build(
     docker: &Docker,
     docker_image: &str,
-    source_dir: &Path,
+    source_dir: PathBuf,
     build_config: &CargoBuildConfig,
     container_network: &Option<String>,
+    source_manifest_path: &PathBuf,
 ) -> Result<BuildOutput, VerificationError> {
-    info!("Starting build with image: {}", docker_image);
+    debug!("Starting build with image: {}", docker_image);
+    let output_file_name = cdylib_target_name(source_manifest_path)?;
 
     // Pull image if needed
     pull_image_if_needed(docker, docker_image).await?;
@@ -121,13 +128,13 @@ pub async fn run_build(
     run_container(docker, &container_id).await?;
 
     // Extract WASM
-    let target_path = build_config.target_path();
+    let target_path = build_config.wasm_output_path(output_file_name)?;
     let wasm_bytes = copy_wasm_from_container(docker, &container_id, &target_path).await?;
 
     docker
         .remove_container(
             &container_id,
-            Some(bollard::container::RemoveContainerOptions {
+            Some(container::RemoveContainerOptions {
                 force: true,
                 ..Default::default()
             }),
@@ -163,6 +170,7 @@ async fn pull_image_if_needed(docker: &Docker, image_name: &str) -> Result<(), V
 
     let options = CreateImageOptions {
         from_image: image_name,
+        platform: "linux/amd64",
         ..Default::default()
     };
 
@@ -202,8 +210,8 @@ async fn create_container(
     let container_name = format!("fluent-build-{container_suffix}");
 
     debug!("Creating container: {}", container_name);
-    info!("Container will remain after completion for debugging");
-    info!("Connect with: docker exec -it {} /bin/bash", container_name);
+    debug!("Container will remain after completion for debugging");
+    debug!("Connect with: docker exec -it {} /bin/bash", container_name);
 
     let options = CreateContainerOptions {
         name: container_name,
@@ -218,13 +226,18 @@ async fn create_container(
 
     let network_mode = container_network.as_deref().unwrap_or("bridge").to_string();
 
+    debug!(
+        "Creating Docker container: image={} workdir={} cmd={:?}, env={:?}",
+        image_name, DOCKER_WORKDIR, cmd_refs, env_refs
+    );
+
     let config = container::Config {
         image: Some(image_name),
-        working_dir: Some(WORKDIR),
+        working_dir: Some(DOCKER_WORKDIR),
         host_config: Some(HostConfig {
             network_mode: Some(network_mode),
             auto_remove: Some(false),
-            memory: Some(MEMORY_LIMIT),
+            memory: Some(DOCKER_MAX_MEMORY_LIMIT),
             ..Default::default()
         }),
         cmd: Some(cmd_refs),
@@ -243,7 +256,7 @@ async fn create_container(
 async fn copy_directory_to_container(
     docker: &Docker,
     container_id: &str,
-    dir: &Path,
+    dir: PathBuf,
 ) -> Result<(), VerificationError> {
     debug!("Copying source from: {:?}", dir);
 
@@ -251,7 +264,7 @@ async fn copy_directory_to_container(
         .map_err(|e| VerificationError::Docker(format!("Failed to build tar: {e}")))?;
 
     let options = UploadToContainerOptions {
-        path: WORKDIR,
+        path: DOCKER_WORKDIR,
         no_overwrite_dir_non_dir: "",
     };
 
@@ -263,8 +276,8 @@ async fn copy_directory_to_container(
     Ok(())
 }
 
-async fn run_container(docker: &Docker, container_id: &str) -> Result<(), VerificationError> {
-    info!("Starting container: {}", container_id);
+async fn run_container(docker: &Docker, container_id: &str) -> Result<String, VerificationError> {
+    debug!("Starting container: {}", container_id);
 
     docker
         .start_container::<String>(container_id, None)
@@ -285,10 +298,12 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<(), Verifi
         .await
         .map_err(|e| VerificationError::Docker(format!("Failed to attach to container: {e}")))?;
 
+    let mut stdout_output = vec![];
     let mut stderr_output = vec![];
 
     while let Some(result) = attach_results.output.next().await {
         match result {
+            Ok(LogOutput::StdOut { message }) => stdout_output.push(message),
             Ok(LogOutput::StdErr { message }) => stderr_output.push(message),
             Err(err) => {
                 return Err(VerificationError::Docker(format!(
@@ -313,14 +328,21 @@ async fn run_container(docker: &Docker, container_id: &str) -> Result<(), Verifi
         }
     }
 
-    Ok(())
+    let stdout = stdout_output
+        .into_iter()
+        .filter_map(|bytes| String::from_utf8(bytes.to_vec()).ok())
+        .collect::<Vec<_>>()
+        .join("");
+
+    Ok(stdout)
 }
+
 async fn copy_wasm_from_container(
     docker: &Docker,
     container_id: &str,
     target_path: &str,
 ) -> Result<Vec<u8>, VerificationError> {
-    info!("Copying WASM from container at {}", target_path);
+    debug!("Copying WASM from container at {}", target_path);
 
     let options = DownloadFromContainerOptions {
         path: target_path.to_string(),
@@ -371,7 +393,7 @@ async fn copy_wasm_from_container(
     ))
 }
 
-fn build_tar_from_directory(dir: &Path) -> Result<Vec<u8>, VerificationError> {
+fn build_tar_from_directory(dir: PathBuf) -> Result<Vec<u8>, VerificationError> {
     let mut tar = tar::Builder::new(Vec::new());
     tar.append_dir_all("", dir)
         .map_err(|e| VerificationError::Docker(format!("Failed to append directory: {e}")))?;
@@ -403,7 +425,10 @@ mod tests {
             profile: BuildProfile::Release,
             features: vec!["mainnet".to_string()],
             no_default_features: false,
-            rustflags: DEFAULT_RUST_FLAGS.to_string(),
+            rust_flags: vec![],
+            manifest_path: Default::default(),
+            target_dir: Default::default(),
+            rust_toolchain: "".to_string(),
         };
 
         let cmd = config.to_command_args();

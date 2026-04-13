@@ -27,17 +27,34 @@ impl From<bollard::errors::Error> for VerificationError {
     }
 }
 
-impl From<git2::Error> for VerificationError {
-    fn from(err: git2::Error) -> Self {
-        match err.code() {
-            git2::ErrorCode::NotFound => {
-                VerificationError::Source(format!("Repository or reference not found: {err}"))
-            }
-            git2::ErrorCode::Auth => {
-                VerificationError::Source(format!("Authentication failed: {err}"))
-            }
-            _ => VerificationError::Source(format!("Git error: {err}")),
-        }
+impl From<gix::head::peel::Error> for VerificationError {
+    fn from(err: gix::head::peel::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
+    }
+}
+impl From<gix::reference::find::existing::Error> for VerificationError {
+    fn from(err: gix::reference::find::existing::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
+    }
+}
+impl From<gix::clone::checkout::main_worktree::Error> for VerificationError {
+    fn from(err: gix::clone::checkout::main_worktree::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
+    }
+}
+impl From<gix::clone::fetch::Error> for VerificationError {
+    fn from(err: gix::clone::fetch::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
+    }
+}
+impl From<gix::clone::Error> for VerificationError {
+    fn from(err: gix::clone::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
+    }
+}
+impl From<gix::Error> for VerificationError {
+    fn from(err: gix::Error) -> Self {
+        Self::VerificationFailed(err.to_string())
     }
 }
 

@@ -8,7 +8,7 @@ option go_package = "github.com/blockscout/blockscout-rs/fluent-verifier";
 service WasmVerifier {
   // Verifies a WASM contract using fluentbase CLI
   rpc VerifyWasm(VerifyWasmRequest) returns (VerifyWasmResponse);
-  
+
   // Lists available SDK versions (Docker image tags)
   rpc ListAvailableVersions(ListAvailableVersionsRequest) returns (ListAvailableVersionsResponse);
 }
@@ -20,16 +20,16 @@ message VerifyWasmRequest {
     ArchiveSource archive_source = 1;
     GitSource git_source = 2;
   }
-  
+
   // Contract address on blockchain
   string contract_address = 3;
-  
+
   // Chain ID where contract is deployed
   string chain_id = 4;
-  
+
   // RPC endpoint to fetch bytecode
   string rpc_endpoint = 5;
-  
+
   // Compilation settings (required)
   CompileSettings compile_settings = 6;
 }
@@ -38,10 +38,6 @@ message VerifyWasmRequest {
 message ArchiveSource {
   // Archive content as bytes
   bytes content = 1;
-  
-  // Path to project directory within archive (e.g., "." or "contracts/my-contract")
-  // If empty, assumes project is at archive root
-  string project_path = 2;
 }
 
 // Git repository source
@@ -49,14 +45,10 @@ message GitSource {
   // Public repository URL (must be HTTPS)
   // e.g., "https://github.com/user/project.git"
   string repository_url = 1;
-  
+
   // Commit hash, tag, or branch to checkout
   // e.g., "main", "v1.0.0", "abc123def456"
   string commit_ref = 2;
-  
-  // Path to project directory within repository
-  // If empty, assumes project is at repository root
-  string project_path = 3;
 }
 
 // Simplified compilation settings
@@ -65,28 +57,33 @@ message CompileSettings {
   // This determines which pre-built Docker image to use
   // Examples: "v0.2.1-dev", "v0.3.0", "latest"
   string sdk_version = 1;
-  
+
   // Cargo features to enable
   // Example: ["mainnet", "testnet"]
   repeated string features = 2;
-  
+
   // Disable default features
   bool no_default_features = 3;
 
-  // // Rust compiler flags (RUSTFLAGS)
-  // // Example: "-Clink-arg=-zstack-size=131072 -Cpanic=abort -Ctarget-feature=+bulk-memory"
-  // string rustflags = 4;
+  // Rust compiler flags (RUSTFLAGS)
+  // Example: ["-Clink-arg=-zstack-size=131072", "-Cpanic=abort", "-Ctarget-feature=+bulk-memory"]
+  repeated string rust_flags = 4;
 
+  // A version of rust toolchain (if empty then the same as in sdk version)
+  string rust_toolchain = 5;
+
+  /// A path to Cargo.toml manifest (default is ./Cargo.toml)
+  string manifest_path = 6;
 }
 
 // Response message for verification
 message VerifyWasmResponse {
   // Verification status
   VerificationStatus status = 1;
-  
+
   // Error message if verification failed
   string error_message = 2;
-  
+
   // Verification result (only if successful)
   VerificationResult result = 3;
 }
@@ -95,25 +92,25 @@ message VerifyWasmResponse {
 enum VerificationStatus {
   // Default value
   STATUS_UNSPECIFIED = 0;
-  
+
   // Verification successful - bytecode matches
   STATUS_SUCCESS = 1;
-  
+
   // Verification failed - bytecode mismatch
   STATUS_BYTECODE_MISMATCH = 2;
-  
+
   // Compilation failed
   STATUS_COMPILATION_FAILED = 3;
-  
+
   // Invalid source or configuration
   STATUS_INVALID_SOURCE = 4;
-  
+
   // Network or RPC error
   STATUS_NETWORK_ERROR = 5;
-  
+
   // SDK version not found (Docker image doesn't exist)
   STATUS_INVALID_SDK_VERSION = 6;
-  
+
   // Other error (see error_message)
   STATUS_ERROR = 7;
 }
@@ -123,19 +120,19 @@ message VerificationResult {
   // Context (echoed from request for debugging/logging)
   string contract_address = 1;
   string chain_id = 2;
-  
+
   // Hash comparison results
   string expected_hash = 3;  // Hash from blockchain
   string actual_hash = 4;    // Hash from compilation
-  
+
   // Compilation settings used (for reproducibility)
   CompileSettings compile_settings = 5;
-  
+
   // Compilation environment info
   string rustc_version = 6;  // e.g., "rustc 1.87.0 (17067e9ac 2025-05-09)"
   string sdk_version = 7;    // Full version: "0.1.0-1c0a988d0e5a0ce3015084d53ffa85d5450c3eac"
   string build_platform = 8; // e.g., "docker:linux-x86_64"
-  
+
   // Source files that were compiled
   // Map: relative path -> content
   map<string, string> source_files = 9;
@@ -152,7 +149,7 @@ message ListAvailableVersionsResponse {
   // Available SDK versions (Docker image tags)
   // e.g., ["v0.2.1-dev", "v0.3.0", "v0.3.1", "latest"]
   repeated string sdk_versions = 1;
-  
+
   // Recommended/latest stable version
   string latest_stable = 2;
 }

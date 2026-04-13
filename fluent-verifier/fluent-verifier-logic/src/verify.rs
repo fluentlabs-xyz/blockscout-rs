@@ -1,9 +1,11 @@
 use crate::{
-    docker::{run_build, BuildProfile, CargoBuildConfig, BASE_IMAGE_NAME, DEFAULT_RUST_FLAGS},
+    docker::{run_build, BuildProfile, CargoBuildConfig},
     error::VerificationError,
+    metadata::workspace_manifest_path,
     proto::{VerifyWasmRequest, VerifyWasmResponse},
     source,
     source::{prepare_source_from_archive, prepare_source_from_git},
+    DEFAULT_RUST_TOOLCHAIN, DOCKER_BASE_IMAGE_NAME,
 };
 use fluent_verifier_proto::blockscout::fluent_verifier::v1::{
     verify_wasm_request::Source, VerificationResult, VerificationStatus,
@@ -12,6 +14,9 @@ use rwasm::RwasmModule;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
+use std::path::PathBuf;
+use tracing::info;
+use tracing::log::debug;
 
 /// Main entry point for contract verification
 pub async fn verify_contract(
@@ -19,8 +24,8 @@ pub async fn verify_contract(
     request: VerifyWasmRequest,
     container_network: &Option<String>,
 ) -> Result<VerifyWasmResponse, VerificationError> {
-    tracing::info!(
-        "new verification request received: {:?}",
+    info!(
+        "New verification request received: {:?}",
         DebugRequest(&request)
     );
 
@@ -39,37 +44,87 @@ pub async fn verify_contract(
 
     let (rwasm, _read_len) = RwasmModule::new(&deployed_bytecode);
     let deployed_hash = calculate_hash(&rwasm.hint_section);
-    tracing::info!("deployed_bytecode wasm section hash: {:?}", &deployed_hash);
+    debug!("Deployed bytecode WASM section hash: {:?}", &deployed_hash);
+
+    // Clone repository
+    let temp_dir = tempfile::tempdir()?;
 
     let source_dir = match &request.source {
-        Some(Source::ArchiveSource(archive)) => prepare_source_from_archive(archive).await?,
-        Some(Source::GitSource(git)) => prepare_source_from_git(git).await?,
+        Some(Source::ArchiveSource(archive)) => {
+            prepare_source_from_archive(&temp_dir, archive).await?
+        }
+        Some(Source::GitSource(git)) => prepare_source_from_git(&temp_dir, git).await?,
         None => {
             return Err(VerificationError::InvalidRequest(
                 "source is required".to_string(),
             ));
         }
+    }
+    .canonicalize()?;
+
+    // We don't specify default rust flags
+    let rust_flags = compile_settings.rust_flags.clone();
+
+    let mut rust_toolchain = compile_settings.rust_toolchain.clone();
+    if rust_toolchain.is_empty() {
+        rust_toolchain = DEFAULT_RUST_TOOLCHAIN.to_string();
+    }
+
+    let relative_manifest_path = if compile_settings.manifest_path.is_empty() {
+        PathBuf::from("Cargo.toml")
+    } else {
+        PathBuf::from(compile_settings.manifest_path.clone())
+    };
+    let mut source_manifest_path = source_dir.join(&relative_manifest_path).canonicalize()?;
+    if source_manifest_path.is_dir() {
+        source_manifest_path = source_manifest_path.join("Cargo.toml");
+    } else if source_manifest_path.is_file() {
+        source_manifest_path
+            .file_name()
+            .filter(|manifest_file_name| manifest_file_name == &"Cargo.toml")
+            .ok_or(VerificationError::InvalidRequest(
+                "incorrect manifest path".to_string(),
+            ))?;
+    }
+
+    let workspace_source_manifest_path = workspace_manifest_path(&source_manifest_path)?;
+    let Ok(workspace_relative_manifest_path) =
+        workspace_source_manifest_path.strip_prefix(&source_dir)
+    else {
+        return Err(VerificationError::InvalidRequest(
+            "incorrect workspace manifest path".to_string(),
+        ));
     };
 
-    let docker_image = format!("{}:{}", BASE_IMAGE_NAME, compile_settings.sdk_version);
+    let docker_image = format!(
+        "{}:{}",
+        DOCKER_BASE_IMAGE_NAME, compile_settings.sdk_version
+    );
     let build_config = CargoBuildConfig {
         profile: BuildProfile::Release,
         features: compile_settings.features.clone(),
         no_default_features: compile_settings.no_default_features,
-        rustflags: DEFAULT_RUST_FLAGS.to_string(),
+        rust_flags,
+        manifest_path: PathBuf::from("/workspace").join(workspace_relative_manifest_path),
+        target_dir: PathBuf::from("/workspace").join("target"),
+        rust_toolchain,
     };
 
     let build_output = run_build(
         docker,
         &docker_image,
-        source_dir.path(),
+        source_dir.clone(),
         &build_config,
         container_network,
+        &source_manifest_path,
     )
     .await?;
 
     let built_hash = calculate_hash(&build_output.wasm_bytes);
-    tracing::info!("built wasm hash: {}", built_hash);
+    debug!(
+        "Output WASM hash: {}, expected_hash={}",
+        built_hash, deployed_hash
+    );
 
     if deployed_hash != built_hash {
         return Ok(VerifyWasmResponse {
@@ -82,9 +137,8 @@ pub async fn verify_contract(
         });
     }
 
-    let source_files = source::collect_source_files(source_dir.path()).await?;
+    let source_files = source::collect_source_files(source_dir.clone()).await?;
 
-    // Step 7: Return success
     Ok(VerifyWasmResponse {
         status: VerificationStatus::StatusSuccess as i32,
         error_message: String::new(),
@@ -191,14 +245,12 @@ impl fmt::Debug for DebugSource<'_> {
                 };
                 f.debug_struct("ArchiveSource")
                     .field("content", &preview)
-                    .field("project_path", &archive.project_path)
                     .finish()
             }
             Some(Source::GitSource(git)) => f
                 .debug_struct("GitSource")
                 .field("repository_url", &git.repository_url)
                 .field("commit_ref", &git.commit_ref)
-                .field("project_path", &git.project_path)
                 .finish(),
         }
     }
@@ -243,6 +295,9 @@ mod tests {
                 sdk_version: String::new(),
                 features: vec![],
                 no_default_features: false,
+                rust_flags: vec![],
+                rust_toolchain: "".to_string(),
+                manifest_path: "".to_string(),
             }),
         };
 
@@ -266,13 +321,10 @@ mod tests {
     #[test]
     fn test_valid_request() {
         let request = VerifyWasmRequest {
-            source: Some(crate::proto::verify_wasm_request::Source::GitSource(
-                crate::proto::GitSource {
-                    repository_url: "https://github.com/test/repo.git".to_string(),
-                    commit_ref: "main".to_string(),
-                    project_path: ".".to_string(),
-                },
-            )),
+            source: Some(Source::GitSource(crate::proto::GitSource {
+                repository_url: "https://github.com/test/repo.git".to_string(),
+                commit_ref: "main".to_string(),
+            })),
             contract_address: "0x1234567890123456789012345678901234567890".to_string(),
             chain_id: "1".to_string(),
             rpc_endpoint: "http://localhost:8545".to_string(),
@@ -280,6 +332,9 @@ mod tests {
                 sdk_version: "v0.2.1-dev".to_string(),
                 features: vec!["test".to_string()],
                 no_default_features: false,
+                rust_flags: vec![],
+                rust_toolchain: "".to_string(),
+                manifest_path: "".to_string(),
             }),
         };
 
