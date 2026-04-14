@@ -36,7 +36,7 @@ pub(crate) fn cdylib_target_name(manifest_path: impl AsRef<Path>) -> anyhow::Res
 
 pub(crate) fn workspace_manifest_path(source_manifest_path: &PathBuf) -> anyhow::Result<PathBuf> {
     let metadata = MetadataCommand::new()
-        .manifest_path(&source_manifest_path)
+        .manifest_path(source_manifest_path)
         .no_deps()
         .exec()?;
 

@@ -135,10 +135,10 @@ async fn extract_archive(
     format: ArchiveFormat,
 ) -> Result<(), VerificationError> {
     match format {
-        ArchiveFormat::TarGz => extract_tar_gz(content, &temp_dir).await?,
-        ArchiveFormat::Zip => extract_zip(content, &temp_dir).await?,
+        ArchiveFormat::TarGz => extract_tar_gz(content, temp_dir).await?,
+        ArchiveFormat::Zip => extract_zip(content, temp_dir).await?,
     }
-    normalize_archive_structure(&temp_dir).await?;
+    normalize_archive_structure(temp_dir).await?;
     Ok(())
 }
 
