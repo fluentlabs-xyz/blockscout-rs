@@ -3,8 +3,7 @@ use crate::{
     proto::{ArchiveSource, GitSource},
 };
 use flate2::read::GzDecoder;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::{path::PathBuf, sync::atomic::AtomicBool};
 use tar::Archive;
 use tempfile::TempDir;
 use tracing::info;

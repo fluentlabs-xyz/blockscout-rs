@@ -1,8 +1,8 @@
 //! Docker orchestration for smart contract compilation
 
-use crate::error::VerificationError;
-use crate::metadata::cdylib_target_name;
-use crate::{DOCKER_MAX_MEMORY_LIMIT, DOCKER_WORKDIR};
+use crate::{
+    error::VerificationError, metadata::cdylib_target_name, DOCKER_MAX_MEMORY_LIMIT, DOCKER_WORKDIR,
+};
 use bollard::{
     container::{
         self, AttachContainerOptions, CreateContainerOptions, DownloadFromContainerOptions,
@@ -13,8 +13,7 @@ use bollard::{
     Docker,
 };
 use futures_util::StreamExt;
-use std::io::Write;
-use std::path::PathBuf;
+use std::{io::Write, path::PathBuf};
 use tracing::{debug, info, trace};
 use uuid::Uuid;
 

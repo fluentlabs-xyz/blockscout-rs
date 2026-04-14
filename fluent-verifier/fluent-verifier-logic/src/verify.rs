@@ -13,10 +13,8 @@ use fluent_verifier_proto::blockscout::fluent_verifier::v1::{
 use rwasm::RwasmModule;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::fmt;
-use std::path::PathBuf;
-use tracing::info;
-use tracing::log::debug;
+use std::{fmt, path::PathBuf};
+use tracing::{info, log::debug};
 
 /// Main entry point for contract verification
 pub async fn verify_contract(
