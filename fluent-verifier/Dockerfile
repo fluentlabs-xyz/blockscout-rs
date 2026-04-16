@@ -15,19 +15,17 @@ COPY --from=cache /app/target target
 COPY --from=cache $CARGO_HOME $CARGO_HOME
 RUN cargo build --release
 
-FROM ubuntu:22.04 AS run
-RUN apt-get update && apt-get install -y libssl3 libssl-dev ca-certificates libcurl4
+FROM ghcr.io/blockscout/services-base:latest AS run
 
 WORKDIR /app
 ENV APP_USER=app
-# Processes in a container should not run as root, so we need to create app user
-# https://medium.com/@mccode/processes-in-containers-should-not-run-as-root-2feae3f0df3b
-RUN groupadd $APP_USER \
-    && useradd -g $APP_USER $APP_USER
+
+RUN groupadd --system $APP_USER \
+    && useradd --system --gid $APP_USER --create-home $APP_USER
 
 COPY --from=build /app/target/release/fluent-verifier-server /app/fluent-verifier-server
 # Change directory access for app user
 RUN chown -R $APP_USER:$APP_USER /app
-USER app
+USER $APP_USER
 
 CMD ["./fluent-verifier-server"]
