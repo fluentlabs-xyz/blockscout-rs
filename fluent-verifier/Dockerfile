@@ -16,7 +16,7 @@ COPY --from=cache $CARGO_HOME $CARGO_HOME
 RUN cargo build --release
 
 FROM ubuntu:22.04 AS run
-RUN apt-get update && apt-get install -y libssl3 libssl-dev ca-certificates
+RUN apt-get update && apt-get install -y libssl3 libssl-dev ca-certificates libcurl4
 
 WORKDIR /app
 ENV APP_USER=app
