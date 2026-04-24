@@ -105,7 +105,7 @@ pub async fn verify_contract(
         rust_flags,
         manifest_path: PathBuf::from("/workspace").join(workspace_relative_manifest_path),
         target_dir: PathBuf::from("/workspace").join("target"),
-        rust_toolchain,
+        rust_toolchain: rust_toolchain.clone(),
     };
 
     let build_output = run_build(
@@ -146,7 +146,7 @@ pub async fn verify_contract(
             expected_hash: format!("0x{}", deployed_hash),
             actual_hash: format!("0x{}", built_hash),
             compile_settings: request.compile_settings.clone(),
-            rustc_version: "1.88.0-x86_64-unknown-linux-gnu".to_string(),
+            rustc_version: format!("{}-x86_64-unknown-linux-gnu", rust_toolchain),
             sdk_version: compile_settings.sdk_version.clone(),
             build_platform: docker_image,
             source_files,
