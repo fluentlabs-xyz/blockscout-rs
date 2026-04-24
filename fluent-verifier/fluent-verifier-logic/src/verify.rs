@@ -135,7 +135,11 @@ pub async fn verify_contract(
         });
     }
 
-    let source_files = source::collect_source_files(source_dir.clone()).await?;
+    let mut source_crate_path = source_manifest_path.clone();
+    if !source_crate_path.is_dir() {
+        source_crate_path.pop();
+    }
+    let source_files = source::collect_source_files(source_crate_path).await?;
 
     Ok(VerifyWasmResponse {
         status: VerificationStatus::StatusSuccess as i32,
