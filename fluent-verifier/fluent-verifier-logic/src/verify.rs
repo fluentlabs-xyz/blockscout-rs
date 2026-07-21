@@ -5,7 +5,7 @@ use crate::{
     proto::{VerifyWasmRequest, VerifyWasmResponse},
     source,
     source::{prepare_source_from_archive, prepare_source_from_git},
-    DEFAULT_RUST_TOOLCHAIN, DOCKER_BASE_IMAGE_NAME,
+    DOCKER_BASE_IMAGE_NAME,
 };
 use fluent_verifier_proto::blockscout::fluent_verifier::v1::{
     verify_wasm_request::Source, VerificationResult, VerificationStatus,
@@ -63,11 +63,6 @@ pub async fn verify_contract(
     // We don't specify default rust flags
     let rust_flags = compile_settings.rust_flags.clone();
 
-    let mut rust_toolchain = compile_settings.rust_toolchain.clone();
-    if rust_toolchain.is_empty() {
-        rust_toolchain = DEFAULT_RUST_TOOLCHAIN.to_string();
-    }
-
     let relative_manifest_path = if compile_settings.manifest_path.is_empty() {
         PathBuf::from("Cargo.toml")
     } else {
@@ -105,7 +100,7 @@ pub async fn verify_contract(
         rust_flags,
         manifest_path: PathBuf::from("/workspace").join(workspace_relative_manifest_path),
         target_dir: PathBuf::from("/workspace").join("target"),
-        rust_toolchain: rust_toolchain.clone(),
+        requested_rust_toolchain: compile_settings.rust_toolchain.clone(),
     };
 
     let build_output = run_build(
@@ -150,9 +145,9 @@ pub async fn verify_contract(
             expected_hash: format!("0x{}", deployed_hash),
             actual_hash: format!("0x{}", built_hash),
             compile_settings: request.compile_settings.clone(),
-            rustc_version: format!("{}-x86_64-unknown-linux-gnu", rust_toolchain),
+            rustc_version: build_output.rustc_version,
             sdk_version: compile_settings.sdk_version.clone(),
-            build_platform: docker_image,
+            build_platform: build_output.image_reference,
             source_files,
         }),
     })
